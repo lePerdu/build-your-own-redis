@@ -14,6 +14,56 @@
 
 #include "protocol.h"
 
+#define MAX_CONNS 10
+#define MAX_EVENTS 10
+
+enum conn_state {
+	CONN_WAIT_REQ,
+	CONN_REQ,
+	CONN_PROCESS_REQ,
+	CONN_WAIT_RES,
+	CONN_RES,
+	CONN_END,
+};
+
+struct conn {
+	int fd;
+	enum conn_state state;
+	struct read_buf read_buf;
+	struct write_buf write_buf;
+};
+
+struct server_state {
+	int socket_fd;
+	int epoll_fd;
+	// TODO: better data structure for faster searching
+	struct conn active_connections[MAX_CONNS];
+};
+
+static void conn_init(struct conn *c, int fd) {
+	c->fd = fd;
+	c->state = CONN_REQ;
+	read_buf_init(&c->read_buf);
+	write_buf_init(&c->write_buf);
+}
+
+static void server_state_init(struct server_state *s, int socket_fd, int epoll_fd) {
+	s->socket_fd = socket_fd;
+	s->epoll_fd = epoll_fd;
+	for (int i = 0; i < MAX_CONNS; i++) {
+		s->active_connections[i].fd = -1;
+	}
+}
+
+static struct conn *find_available_conn(struct server_state *s) {
+	for (int i = 0; i < MAX_CONNS; i++) {
+		if (s->active_connections[i].fd == -1) {
+			return &s->active_connections[i];
+		}
+	}
+	return NULL;
+}
+
 [[noreturn]] static void die_errno(const char *msg) {
 	perror(msg);
 	exit(EXIT_FAILURE);
@@ -84,29 +134,6 @@ static int setup_socket(void) {
 	return fd;
 }
 
-enum conn_state {
-	CONN_WAIT_REQ,
-	CONN_REQ,
-	CONN_PROCESS_REQ,
-	CONN_WAIT_RES,
-	CONN_RES,
-	CONN_END,
-};
-
-struct conn {
-	int fd;
-	enum conn_state state;
-	struct read_buf read_buf;
-	struct write_buf write_buf;
-};
-
-static void conn_init(struct conn *c, int fd) {
-	c->fd = fd;
-	c->state = CONN_REQ;
-	read_buf_init(&c->read_buf);
-	write_buf_init(&c->write_buf);
-}
-
 static void handle_read_req(struct conn *conn) {
 	enum read_result res = read_buf_fill(conn->fd, &conn->read_buf);
 	switch (res) {
@@ -169,7 +196,7 @@ static void handle_write_res(struct conn *conn) {
 	}
 }
 
-static void handle_end(struct conn *conn) {
+static void handle_end(struct server_state *s, struct conn *conn) {
 	int res = close(conn->fd);
 	if (res == -1) {
 		fprintf(stderr, "failed to close socket\n");
@@ -178,36 +205,19 @@ static void handle_end(struct conn *conn) {
 
 	// Mark for re-use
 	conn->fd = -1;
-}
 
-#define MAX_CONNS 10
-#define MAX_EVENTS MAX_CONNS
-
-struct server_state {
-	int socket_fd;
-	int epoll_fd;
-	// TODO: better data structure for faster searching
-	struct conn active_connections[MAX_CONNS];
-};
-
-static void server_state_init(struct server_state *s, int socket_fd, int epoll_fd) {
-	s->socket_fd = socket_fd;
-	s->epoll_fd = epoll_fd;
-	for (int i = 0; i < MAX_CONNS; i++) {
-		s->active_connections[i].fd = -1;
+	// TODO: Only do this when required
+	struct epoll_event ev = {
+		.events = EPOLLIN,
+		.data.ptr = NULL,
+	};
+	res = epoll_ctl(s->epoll_fd, EPOLL_CTL_MOD, s->socket_fd, &ev);
+	if (res == -1) {
+		perror("failed to re-enable listening socket to epoll group");
 	}
 }
 
-static struct conn *find_available_conn(struct server_state *s) {
-	for (int i = 0; i < MAX_CONNS; i++) {
-		if (s->active_connections[i].fd == -1) {
-			return &s->active_connections[i];
-		}
-	}
-	return NULL;
-}
-
-static void handle_data_available(struct conn *conn) {
+static void handle_data_available(struct server_state *s, struct conn *conn) {
 	// Reset wait states from poll
 	if (conn->state == CONN_WAIT_REQ) {
 		conn->state = CONN_REQ;
@@ -230,11 +240,11 @@ static void handle_data_available(struct conn *conn) {
 			handle_write_res(conn);
 			break;
 		case CONN_END:
-			handle_end(conn);
+			handle_end(s, conn);
 			return;
 		default:
 			fprintf(stderr, "Invalid state: %d\n", conn->state);
-			handle_end(conn);
+			handle_end(s, conn);
 			return;
 		}
 	}
@@ -243,9 +253,16 @@ static void handle_data_available(struct conn *conn) {
 static void handle_new_connection(struct server_state *s) {
 	struct conn *new_conn = find_available_conn(s);
 	if (new_conn == NULL) {
-		// TODO: Just leave things alone and wait until a connection opens?
-		// Stop the server?
-		fprintf(stderr, "Too many connections\n");
+		fprintf(stderr, "too many active connections\n");
+		// Hold off on new connections until a spot is available
+		struct epoll_event ev = {
+			.events = 0,
+			.data.ptr = NULL,
+		};
+		int res = epoll_ctl(s->epoll_fd, EPOLL_CTL_MOD, s->socket_fd, &ev);
+		if (res == -1) {
+			perror("could not disable epoll for listening socket");
+		}
 		return;
 	}
 
@@ -264,8 +281,7 @@ static void handle_new_connection(struct server_state *s) {
 	}
 
 	struct epoll_event ev = {
-		// TODO EPOLLET?
-		.events = EPOLLIN | EPOLLOUT,
+		.events = EPOLLIN | EPOLLOUT | EPOLLET,
 		.data.ptr = new_conn,
 	};
 	int res = epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, conn_fd, &ev);
@@ -277,7 +293,7 @@ static void handle_new_connection(struct server_state *s) {
 	conn_init(new_conn, conn_fd);
 	fprintf(stderr, "openned connection [%d]\n", conn_fd);
 	// Check immediately in case data is available
-	handle_data_available(new_conn);
+	handle_data_available(s, new_conn);
 }
 
 int main(void) {
@@ -314,7 +330,7 @@ int main(void) {
 			if (events[i].data.ptr == NULL) {
 				handle_new_connection(&server);
 			} else {
-				handle_data_available(events[i].data.ptr);
+				handle_data_available(&server, events[i].data.ptr);
 			}
 		}
 	}
