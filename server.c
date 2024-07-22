@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <assert.h>
+#include <bits/types/struct_iovec.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <stdbool.h>
@@ -11,6 +12,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "protocol.h"
 
@@ -18,12 +20,12 @@
 #define MAX_EVENTS 10
 
 enum conn_state {
-	CONN_WAIT_REQ,
-	CONN_REQ,
+	CONN_WAIT_READ,
+	CONN_READ_REQ,
 	CONN_PROCESS_REQ,
-	CONN_WAIT_RES,
-	CONN_RES,
-	CONN_END,
+	CONN_WAIT_WRITE,
+	CONN_WRITE_RES,
+	CONN_CLOSE,
 };
 
 struct conn {
@@ -42,7 +44,7 @@ struct server_state {
 
 static void conn_init(struct conn *c, int fd) {
 	c->fd = fd;
-	c->state = CONN_REQ;
+	c->state = CONN_READ_REQ;
 	read_buf_init(&c->read_buf);
 	write_buf_init(&c->write_buf);
 }
@@ -134,6 +136,83 @@ static int setup_socket(void) {
 	return fd;
 }
 
+enum read_result {
+	READ_OK = 0,
+	READ_IO_ERR = -1,
+	READ_EOF = -3,
+	READ_MORE = -4,
+};
+
+/**
+ * Fill read buffer with data from `fd`.
+ *
+ * The full buffer capacity is requested from `fd`, although this may read less
+ * than the full capacity.
+ */
+static enum read_result read_buf_fill(int fd, struct read_buf *r) {
+	// Make room for full message.
+	// TODO: Better heuristic for when to move data in buffer?
+	read_buf_reset_start(r);
+
+	size_t cap = read_buf_cap(r);
+	// TODO: Are there valid scenarios where this is desired?
+	assert(cap > 0);
+
+	ssize_t n_read;
+	// Repeat for EINTR
+	do {
+		n_read = read(fd, read_buf_read_pos(r), cap);
+	} while (n_read == -1 && errno == EINTR);
+
+	if (n_read == -1) {
+		if (errno == EAGAIN) {
+			return READ_MORE;
+		} else {
+			return READ_IO_ERR;
+		}
+	} else if (n_read == 0) {
+		return READ_EOF;
+	} else {
+		assert(n_read > 0);
+		read_buf_inc_size(r, n_read);
+		return READ_OK;
+	}
+}
+
+enum send_result {
+	SEND_OK = 0,
+	SEND_IO_ERR = -1,
+	SEND_MORE = -2,
+};
+
+static enum send_result write_buf_flush(int fd, struct write_buf *w) {
+	size_t remaining = write_buf_remaining(w);
+	assert(remaining > 0);
+
+	ssize_t n_write;
+	do {
+		n_write = write(fd, write_buf_write_pos(w), remaining);
+	} while (n_write == -1 && errno == EINTR);
+
+	if (n_write == -1) {
+		if (errno == EAGAIN) {
+			return SEND_MORE;
+		} else {
+			return SEND_IO_ERR;
+		}
+	}
+
+	assert(n_write > 0);
+	write_buf_advance(w, n_write);
+	remaining = write_buf_remaining(w);
+	if (remaining == 0) {
+		write_buf_reset(w);
+		return SEND_OK;
+	} else {
+		return SEND_MORE;
+	}
+}
+
 static void handle_read_req(struct conn *conn) {
 	enum read_result res = read_buf_fill(conn->fd, &conn->read_buf);
 	switch (res) {
@@ -142,14 +221,14 @@ static void handle_read_req(struct conn *conn) {
 			break;
 		case READ_IO_ERR:
 			perror("failed to read from socket");
-			conn->state = CONN_END;
+			conn->state = CONN_CLOSE;
 			break;
 		case READ_EOF:
 			fprintf(stderr, "socket EOF [%d]\n", conn->fd);
-			conn->state= CONN_END;
+			conn->state= CONN_CLOSE;
 			break;
 		case READ_MORE:
-			conn->state = CONN_WAIT_REQ;
+			conn->state = CONN_WAIT_READ;
 			break;
 		default:
 			assert(false);
@@ -157,15 +236,15 @@ static void handle_read_req(struct conn *conn) {
 }
 
 static void handle_process_req(struct conn *conn) {
-	uint8_t msg_buf[PROTO_MAX_MESSAGE_SIZE + 1];
+	uint8_t msg_buf[PROTO_MAX_PAYLOAD_SIZE + 1];
 	ssize_t msg_size = read_buf_parse(&conn->read_buf, msg_buf);
 	switch (msg_size) {
 		case PARSE_ERR:
 			fprintf(stderr, "invalid message\n");
-			conn->state = CONN_END;
+			conn->state = CONN_CLOSE;
 			return;
 		case PARSE_MORE:
-			conn->state= CONN_REQ;
+			conn->state= CONN_READ_REQ;
 			return;
 	}
 
@@ -175,21 +254,21 @@ static void handle_process_req(struct conn *conn) {
 
 	write_buf_set_message(&conn->write_buf, msg_buf, msg_size);
 
-	conn->state = CONN_RES;
+	conn->state = CONN_WRITE_RES;
 }
 
 static void handle_write_res(struct conn *conn) {
-	enum write_result res = write_buf_flush(conn->fd, &conn->write_buf);
+	enum send_result res = write_buf_flush(conn->fd, &conn->write_buf);
 	switch (res) {
-		case WRITE_OK:
+		case SEND_OK:
 			conn->state = CONN_PROCESS_REQ;
 			break;
-		case WRITE_IO_ERR:
+		case SEND_IO_ERR:
 			fprintf(stderr, "failed to write message\n");
-			conn->state = CONN_END;
+			conn->state = CONN_CLOSE;
 			break;
-		case WRITE_MORE:
-			conn->state = CONN_WAIT_RES;
+		case SEND_MORE:
+			conn->state = CONN_WAIT_WRITE;
 			break;
 		default:
 			assert(false);
@@ -219,27 +298,27 @@ static void handle_end(struct server_state *s, struct conn *conn) {
 
 static void handle_data_available(struct server_state *s, struct conn *conn) {
 	// Reset wait states from poll
-	if (conn->state == CONN_WAIT_REQ) {
-		conn->state = CONN_REQ;
-	} else if (conn->state == CONN_WAIT_RES) {
-		conn->state = CONN_RES;
+	if (conn->state == CONN_WAIT_READ) {
+		conn->state = CONN_READ_REQ;
+	} else if (conn->state == CONN_WAIT_WRITE) {
+		conn->state = CONN_WRITE_RES;
 	}
 
 	while (true) {
 		switch (conn->state) {
-		case CONN_WAIT_REQ:
-		case CONN_WAIT_RES:
+		case CONN_WAIT_READ:
+		case CONN_WAIT_WRITE:
 			return;
-		case CONN_REQ:
+		case CONN_READ_REQ:
 			handle_read_req(conn);
 			break;
 		case CONN_PROCESS_REQ:
 			handle_process_req(conn);
 			break;
-		case CONN_RES:
+		case CONN_WRITE_RES:
 			handle_write_res(conn);
 			break;
-		case CONN_END:
+		case CONN_CLOSE:
 			handle_end(s, conn);
 			return;
 		default:
