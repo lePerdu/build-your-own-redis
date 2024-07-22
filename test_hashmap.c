@@ -1,0 +1,161 @@
+#include <stdlib.h>
+
+#include "hashmap.h"
+#include "test.h"
+
+struct test_node {
+	struct hash_entry entry;
+	int key;
+	int val;
+};
+
+static bool test_node_cmp(const void *a, const void *b) {
+	return (
+		((const struct test_node *) a)->key ==
+		((const struct test_node *) b)->key
+	);
+}
+
+static void test_key_init(struct test_node *key_node, int key) {
+	key_node->entry.hash_code = key;
+	key_node->key = key;
+}
+
+static struct test_node *test_node_alloc(int key, int val) {
+	struct test_node *n = malloc(sizeof(*n));
+	test_key_init(n, key);
+	n->val = val;
+	return n;
+}
+
+static void test_hashmap_get_missing(void) {
+	struct hash_map m;
+	hash_map_init(&m, 8);
+	struct test_node key;
+	test_key_init(&key, 5);
+	void *found = hash_map_get(&m, (void *) &key, test_node_cmp);
+	assert(found == NULL);
+}
+
+static void test_hashmap_get_after_insert(void) {
+	struct hash_map m;
+	hash_map_init(&m, 8);
+	struct test_node* node = test_node_alloc(5, 10);
+	hash_map_insert(&m, (void *) node);
+
+	struct test_node key;
+	test_key_init(&key, 5);
+	struct test_node *found = (void *) hash_map_get(&m, (void *) &key, test_node_cmp);
+	assert(found != NULL);
+	assert(found->key == 5);
+	assert(found->val == 10);
+}
+
+static void test_hashmap_get_other_key_after_insert(void) {
+	struct hash_map m;
+	hash_map_init(&m, 8);
+	struct test_node* node = test_node_alloc(5, 10);
+	hash_map_insert(&m, (void *) node);
+
+	struct test_node key;
+	test_key_init(&key, 4);
+	void *found = hash_map_get(&m, (void *) &key, test_node_cmp);
+	assert(found == NULL);
+}
+
+static void test_hashmap_get_other_key_same_bucket_after_insert(void) {
+	struct hash_map m;
+	hash_map_init(&m, 8);
+	struct test_node* node = test_node_alloc(5, 10);
+	hash_map_insert(&m, (void *) node);
+
+	struct test_node key;
+	test_key_init(&key, 5 + 8);
+	void *found = hash_map_get(&m, (void *) &key, test_node_cmp);
+	assert(found == NULL);
+}
+
+static void test_hashmap_get_missing_after_delete(void) {
+	struct hash_map m;
+	hash_map_init(&m, 8);
+	struct test_node* inserted = test_node_alloc(5, 10);
+	hash_map_insert(&m, (void *) inserted);
+
+	struct test_node key;
+	test_key_init(&key, 5);
+	struct test_node *removed =
+		(void *) hash_map_delete(&m, (void *) &key, test_node_cmp);
+	assert(removed == inserted);
+	assert(removed->key == 5);
+	assert(removed->val == 10);
+}
+
+static void test_hashmap_delete_missing(void) {
+	struct hash_map m;
+	hash_map_init(&m, 8);
+
+	struct test_node key;
+	test_key_init(&key, 5);
+	struct test_node *removed =
+		(void *) hash_map_delete(&m, (void *) &key, test_node_cmp);
+	assert(removed == NULL);
+}
+
+static void test_hashmap_get_after_delete_and_reinsert(void) {
+	struct hash_map m;
+	hash_map_init(&m, 8);
+	struct test_node* inserted = test_node_alloc(5, 10);
+	hash_map_insert(&m, (void *) inserted);
+
+	struct test_node key;
+	test_key_init(&key, 5);
+	struct test_node *removed =
+		(void *) hash_map_delete(&m, (void *) &key, test_node_cmp);
+	assert(removed != NULL);
+
+	struct test_node* new = test_node_alloc(5, 6);
+	hash_map_insert(&m, (void *) new);
+
+	test_key_init(&key, 5);
+	struct test_node *found =
+		(void *) hash_map_get(&m, (void *) &key, test_node_cmp);
+	assert(found != NULL);
+	assert(found->key == 5);
+	assert(found->val == 6);
+}
+
+static void test_hashmap_holds_10000_entries(void) {
+	const int test_count = 10000;
+
+	struct hash_map m;
+	hash_map_init(&m, 8);
+
+	for (int i = 0; i < test_count; i++) {
+		// Store double to easily check later
+		struct test_node* inserted = test_node_alloc(i, i * 2);
+		hash_map_insert(&m, (void *) inserted);
+	}
+
+	for (int i = 0; i < test_count; i++) {
+		struct test_node key;
+		test_key_init(&key, i);
+		struct test_node *found =
+			(void *)hash_map_get(&m, (void *) &key, test_node_cmp);
+		assert(found != NULL);
+		assert(found->key == i);
+		assert(found->val == i * 2);
+	}
+}
+
+void test_hashmap(void) {
+	RUN_TEST(test_hashmap_get_missing);
+	RUN_TEST(test_hashmap_get_after_insert);
+	RUN_TEST(test_hashmap_get_other_key_after_insert);
+	RUN_TEST(test_hashmap_get_other_key_same_bucket_after_insert);
+
+	RUN_TEST(test_hashmap_delete_missing);
+	RUN_TEST(test_hashmap_get_missing_after_delete);
+	RUN_TEST(test_hashmap_get_after_delete_and_reinsert);
+
+	RUN_TEST(test_hashmap_holds_10000_entries);
+}

@@ -3,7 +3,7 @@ CFLAGS = -std=c11 -Wall -Wextra -Og -g
 BUILD = build
 BIN = bin
 
-COMMON_SRCS = protocol.c
+COMMON_SRCS = hashmap.c protocol.c
 COMMON_OBJS = $(COMMON_SRCS:%.c=$(BUILD)/%.o)
 
 SERVER_SRCS = server.c
