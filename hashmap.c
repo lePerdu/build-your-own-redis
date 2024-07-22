@@ -1,7 +1,10 @@
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "hashmap.h"
+
+#define MAX_LOAD_FACTOR 8
 
 static void ht_init(struct hash_table *ht, size_t cap) {
 	assert(cap > 0);
@@ -46,6 +49,21 @@ static struct hash_entry *ht_detach(
 	return node;
 }
 
+static void ht_move_entries(struct hash_table *to, struct hash_table *from) {
+	for (size_t index = 0; index <= from->mask; index++) {
+		struct hash_entry *entry = from->data[index];
+		while (entry != NULL) {
+			struct hash_entry *next = entry->next;
+			ht_insert(to, entry);
+			entry = next;
+			from->size--;
+		}
+		from->data[index] = NULL;
+	}
+
+	assert(from->size == 0);
+}
+
 void hash_map_init(struct hash_map *m, size_t cap) {
 	ht_init(&m->ht, cap);
 }
@@ -65,6 +83,14 @@ struct hash_entry *hash_map_get(
 
 void hash_map_insert(struct hash_map *m, struct hash_entry *entry) {
 	ht_insert(&m->ht, entry);
+
+	size_t capacity = m->ht.mask + 1;
+	if (m->ht.size >= MAX_LOAD_FACTOR * capacity) {
+		struct hash_table new_table;
+		ht_init(&new_table, capacity * 2);
+		ht_move_entries(&new_table, &m->ht);
+		memcpy(&m->ht, &new_table, sizeof(new_table));
+	}
 }
 
 struct hash_entry *hash_map_delete(

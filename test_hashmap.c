@@ -124,24 +124,33 @@ static void test_hashmap_get_after_delete_and_reinsert(void) {
 	assert(found->val == 6);
 }
 
-static void test_hashmap_holds_10000_entries(void) {
-	const int test_count = 10000;
+#define STRESS_TEST_COUNT 1000000
 
+static void test_hashmap_insert_and_delete_many_entries(void) {
 	struct hash_map m;
 	hash_map_init(&m, 8);
 
-	for (int i = 0; i < test_count; i++) {
+	for (int i = 0; i < STRESS_TEST_COUNT; i++) {
 		// Store double to easily check later
 		struct test_node* inserted = test_node_alloc(i, i * 2);
 		hash_map_insert(&m, (void *) inserted);
 	}
 
-	for (int i = 0; i < test_count; i++) {
+	// Remove even ones
+	for (int i = 0; i < STRESS_TEST_COUNT; i += 2) {
+		struct test_node key;
+		test_key_init(&key, i);
+		struct test_node *removed =
+			(void *)hash_map_delete(&m, (void *) &key, test_node_cmp);
+		assert(removed != NULL);
+	}
+
+	// Get odd ones
+	for (int i = 1; i < STRESS_TEST_COUNT; i += 2) {
 		struct test_node key;
 		test_key_init(&key, i);
 		struct test_node *found =
 			(void *)hash_map_get(&m, (void *) &key, test_node_cmp);
-		assert(found != NULL);
 		assert(found->key == i);
 		assert(found->val == i * 2);
 	}
@@ -157,5 +166,5 @@ void test_hashmap(void) {
 	RUN_TEST(test_hashmap_get_missing_after_delete);
 	RUN_TEST(test_hashmap_get_after_delete_and_reinsert);
 
-	RUN_TEST(test_hashmap_holds_10000_entries);
+	RUN_TEST(test_hashmap_insert_and_delete_many_entries);
 }
