@@ -1,31 +1,26 @@
+#include <bits/types/struct_iovec.h>
+#define _GNU_SOURCE
 #include <arpa/inet.h>
 #include <assert.h>
-#include <bits/types/struct_iovec.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/epoll.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <time.h>
-#include <unistd.h>
-#include <errno.h>
+#include <liburing.h>
 
 #include "protocol.h"
 
-#define MAX_CONNS 10
-#define MAX_EVENTS 10
+#define MAX_CONNS 20
+#define QUEUE_DEPTH (MAX_CONNS + 1)
 
 enum conn_state {
-	CONN_WAIT_READ,
 	CONN_READ_REQ,
+	CONN_WAIT_READ,
 	CONN_PROCESS_REQ,
-	CONN_WAIT_WRITE,
 	CONN_WRITE_RES,
+	CONN_WAIT_WRITE,
 	CONN_CLOSE,
+	CONN_WAIT_CLOSE,
+	CONN_END,
 };
 
 struct conn {
@@ -37,7 +32,8 @@ struct conn {
 
 struct server_state {
 	int socket_fd;
-	int epoll_fd;
+	struct io_uring uring;
+	unsigned active_conn_count;
 	// TODO: better data structure for faster searching
 	struct conn active_connections[MAX_CONNS];
 };
@@ -49,40 +45,9 @@ static void conn_init(struct conn *c, int fd) {
 	write_buf_init(&c->write_buf);
 }
 
-static void server_state_init(struct server_state *s, int socket_fd, int epoll_fd) {
-	s->socket_fd = socket_fd;
-	s->epoll_fd = epoll_fd;
-	for (int i = 0; i < MAX_CONNS; i++) {
-		s->active_connections[i].fd = -1;
-	}
-}
-
-static struct conn *find_available_conn(struct server_state *s) {
-	for (int i = 0; i < MAX_CONNS; i++) {
-		if (s->active_connections[i].fd == -1) {
-			return &s->active_connections[i];
-		}
-	}
-	return NULL;
-}
-
 [[noreturn]] static void die_errno(const char *msg) {
 	perror(msg);
 	exit(EXIT_FAILURE);
-}
-
-static int set_nonblocking(int fd) {
-	int flags = fcntl(fd, F_GETFL);
-	if (flags == -1) {
-		return -1;
-	}
-
-	flags = fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-	if (flags == -1) {
-		return -1;
-	}
-
-	return 0;
 }
 
 // TODO Return error to caller instead of dying?
@@ -136,103 +101,89 @@ static int setup_socket(void) {
 	return fd;
 }
 
-enum read_result {
-	READ_OK = 0,
-	READ_IO_ERR = -1,
-	READ_EOF = -3,
-	READ_MORE = -4,
-};
+static void server_state_init(struct server_state *s) {
+	s->socket_fd = setup_socket();
+	s->active_conn_count = 0;
+	for (int i = 0; i < MAX_CONNS; i++) {
+		s->active_connections[i].fd = -1;
+		s->active_connections[i].state = CONN_END;
+	}
+	io_uring_queue_init(QUEUE_DEPTH, &s->uring, 0);
+}
 
-/**
- * Fill read buffer with data from `fd`.
- *
- * The full buffer capacity is requested from `fd`, although this may read less
- * than the full capacity.
- */
-static enum read_result read_buf_fill(int fd, struct read_buf *r) {
-	// Make room for full message.
-	// TODO: Better heuristic for when to move data in buffer?
-	read_buf_reset_start(r);
+static struct conn *find_available_conn(struct server_state *s) {
+	for (int i = 0; i < MAX_CONNS; i++) {
+		if (s->active_connections[i].fd == -1) {
+			return &s->active_connections[i];
+		}
+	}
+	return NULL;
+}
 
-	size_t cap = read_buf_cap(r);
-	// TODO: Are there valid scenarios where this is desired?
+static void submit_accept_req(struct server_state *s) {
+	struct io_uring_sqe *sqe = io_uring_get_sqe(&s->uring);
+
+	io_uring_prep_accept(sqe, s->socket_fd, NULL, NULL, 0);
+	io_uring_sqe_set_data(sqe, NULL);
+
+	// TODO Wait until all processing is done before submitting events
+	int res = io_uring_submit(&s->uring);
+	if (res < 0) {
+		errno = -res;
+		die_errno("failed to setup accept");
+	}
+}
+
+static void handle_read_req(struct server_state *s, struct conn *conn) {
+	struct io_uring_sqe *sqe = io_uring_get_sqe(&s->uring);
+
+	struct read_buf *rb = &conn->read_buf;
+	// TODO: Better heuristic for when to move data
+	read_buf_reset_start(rb);
+	size_t cap = read_buf_cap(rb);
 	assert(cap > 0);
+	io_uring_prep_read(
+		sqe, conn->fd, read_buf_read_pos(rb), cap, 0
+	);
+	io_uring_sqe_set_data(sqe, conn);
 
-	ssize_t n_read;
-	// Repeat for EINTR
-	do {
-		n_read = read(fd, read_buf_read_pos(r), cap);
-	} while (n_read == -1 && errno == EINTR);
-
-	if (n_read == -1) {
-		if (errno == EAGAIN) {
-			return READ_MORE;
-		} else {
-			return READ_IO_ERR;
-		}
-	} else if (n_read == 0) {
-		return READ_EOF;
-	} else {
-		assert(n_read > 0);
-		read_buf_inc_size(r, n_read);
-		return READ_OK;
+	// TODO Wait until all processing is done before submitting events
+	int res = io_uring_submit(&s->uring);
+	if (res < 0) {
+		errno = -res;
+		perror("failed to submit read request");
+		conn->state = CONN_CLOSE;
+		return;
 	}
+
+	conn->state = CONN_WAIT_READ;
 }
 
-enum send_result {
-	SEND_OK = 0,
-	SEND_IO_ERR = -1,
-	SEND_MORE = -2,
-};
-
-static enum send_result write_buf_flush(int fd, struct write_buf *w) {
-	size_t remaining = write_buf_remaining(w);
-	assert(remaining > 0);
-
-	ssize_t n_write;
-	do {
-		n_write = write(fd, write_buf_write_pos(w), remaining);
-	} while (n_write == -1 && errno == EINTR);
-
-	if (n_write == -1) {
-		if (errno == EAGAIN) {
-			return SEND_MORE;
-		} else {
-			return SEND_IO_ERR;
+static void handle_check_read(struct conn *conn, int res) {
+	if (res < 0) {
+		fprintf(
+			stderr,
+			"failed to read from stream [%d]: %s\n",
+			conn->fd,
+			strerror(-res)
+		);
+		conn->state = CONN_CLOSE;
+		return;
+	} else if (res == 0) {
+		if (read_buf_size(&conn->read_buf) == 0) {
+			fprintf(stderr, "end of stream [%d]\n", conn->fd);
+		} else  {
+			fprintf(
+				stderr, "end of stream with partial message [%d]\n", conn->fd
+			);
 		}
+
+		conn->state = CONN_CLOSE;
+		return;
 	}
 
-	assert(n_write > 0);
-	write_buf_advance(w, n_write);
-	remaining = write_buf_remaining(w);
-	if (remaining == 0) {
-		write_buf_reset(w);
-		return SEND_OK;
-	} else {
-		return SEND_MORE;
-	}
-}
-
-static void handle_read_req(struct conn *conn) {
-	enum read_result res = read_buf_fill(conn->fd, &conn->read_buf);
-	switch (res) {
-		case READ_OK:
-			conn->state = CONN_PROCESS_REQ;
-			break;
-		case READ_IO_ERR:
-			perror("failed to read from socket");
-			conn->state = CONN_CLOSE;
-			break;
-		case READ_EOF:
-			fprintf(stderr, "socket EOF [%d]\n", conn->fd);
-			conn->state= CONN_CLOSE;
-			break;
-		case READ_MORE:
-			conn->state = CONN_WAIT_READ;
-			break;
-		default:
-			assert(false);
-	}
+	read_buf_inc_size(&conn->read_buf, res);
+	conn->state = CONN_PROCESS_REQ;
 }
 
 static void handle_process_req(struct conn *conn) {
@@ -257,161 +208,208 @@ static void handle_process_req(struct conn *conn) {
 	conn->state = CONN_WRITE_RES;
 }
 
-static void handle_write_res(struct conn *conn) {
-	enum send_result res = write_buf_flush(conn->fd, &conn->write_buf);
-	switch (res) {
-		case SEND_OK:
-			conn->state = CONN_PROCESS_REQ;
-			break;
-		case SEND_IO_ERR:
-			fprintf(stderr, "failed to write message\n");
-			conn->state = CONN_CLOSE;
-			break;
-		case SEND_MORE:
-			conn->state = CONN_WAIT_WRITE;
-			break;
-		default:
-			assert(false);
+static void handle_write_res(struct server_state *s, struct conn *conn) {
+	struct io_uring_sqe *sqe = io_uring_get_sqe(&s->uring);
+
+	struct write_buf *wb = &conn->write_buf;
+	size_t remaining = write_buf_remaining(wb);
+
+	io_uring_prep_write(
+		sqe,
+		conn->fd,
+		write_buf_write_pos(wb),
+		remaining,
+		0
+	);
+	io_uring_sqe_set_data(sqe, conn);
+
+	// TODO Wait until all processing is done before submitting events
+	int res = io_uring_submit(&s->uring);
+	if (res < 0) {
+		errno = -res;
+		perror("failed to submit write request");
+		conn->state = CONN_CLOSE;
+		return;
 	}
+
+	conn->state = CONN_WAIT_WRITE;
+}
+
+static void handle_check_write( struct conn *conn, int res) {
+	if (res < 0) {
+		fprintf(
+			stderr,
+			"failed to write to stream [%d]: %s\n",
+			conn->fd,
+			strerror(-res)
+		);
+		conn->state = CONN_CLOSE;
+		return;
+	} else if (res == 0) {
+		// TODO: Can this happen?
+		fprintf(
+			stderr,
+			"failed to write to stream [%d]: end of stream\n",
+			conn->fd
+		);
+		conn->state = CONN_CLOSE;
+		return;
+	}
+
+	struct write_buf *wb = &conn->write_buf;
+	write_buf_advance(wb, res);
+	size_t remaining = write_buf_remaining(wb);
+	if (remaining == 0) {
+		write_buf_reset(wb);
+		conn->state = CONN_PROCESS_REQ;
+	} else {
+		conn->state = CONN_WRITE_RES;
+	}
+}
+
+static void handle_close(struct server_state *s, struct conn *conn) {
+	struct io_uring_sqe *sqe = io_uring_get_sqe(&s->uring);
+
+	io_uring_prep_close(sqe, conn->fd);
+	io_uring_sqe_set_data(sqe, conn);
+
+	// TODO Wait until all processing is done before submitting events
+	int res = io_uring_submit(&s->uring);
+	if (res < 0) {
+		errno = -res;
+		perror("failed to submit close request");
+		// Nothing to do but "forget" the connection?
+		conn->state = CONN_END;
+		return;
+	}
+
+	conn->state = CONN_WAIT_CLOSE;
+}
+
+static void handle_check_close(struct conn *conn, int res) {
+	if (res < 0) {
+		errno = -res;
+		perror("failed to close stream");
+		// Nothing to do but "forget" the connection?
+	} else {
+		fprintf(stderr, "closed connection [%d]\n", conn->fd);
+	}
+
+	conn->state = CONN_END;
 }
 
 static void handle_end(struct server_state *s, struct conn *conn) {
-	int res = close(conn->fd);
-	if (res == -1) {
-		fprintf(stderr, "failed to close socket\n");
-	}
-	fprintf(stderr, "closed connected [%d]\n", conn->fd);
-
 	// Mark for re-use
 	conn->fd = -1;
 
-	// TODO: Only do this when required
-	struct epoll_event ev = {
-		.events = EPOLLIN,
-		.data.ptr = NULL,
-	};
-	res = epoll_ctl(s->epoll_fd, EPOLL_CTL_MOD, s->socket_fd, &ev);
-	if (res == -1) {
-		perror("failed to re-enable listening socket to epoll group");
+	if (s->active_conn_count == MAX_CONNS) {
+		submit_accept_req(s);
 	}
+	s->active_conn_count--;
 }
 
-static void handle_data_available(struct server_state *s, struct conn *conn) {
-	// Reset wait states from poll
-	if (conn->state == CONN_WAIT_READ) {
-		conn->state = CONN_READ_REQ;
-	} else if (conn->state == CONN_WAIT_WRITE) {
-		conn->state = CONN_WRITE_RES;
-	}
-
+static void run_conn_state_machine(struct server_state *s, struct conn *conn) {
 	while (true) {
 		switch (conn->state) {
 		case CONN_WAIT_READ:
 		case CONN_WAIT_WRITE:
+		case CONN_WAIT_CLOSE:
+			// Pause execution until data is available
 			return;
 		case CONN_READ_REQ:
-			handle_read_req(conn);
+			handle_read_req(s, conn);
 			break;
 		case CONN_PROCESS_REQ:
 			handle_process_req(conn);
 			break;
 		case CONN_WRITE_RES:
-			handle_write_res(conn);
+			handle_write_res(s, conn);
 			break;
 		case CONN_CLOSE:
+			handle_close(s, conn);
+			break;
+		case CONN_END:
 			handle_end(s, conn);
 			return;
 		default:
 			fprintf(stderr, "Invalid state: %d\n", conn->state);
-			handle_end(s, conn);
+			handle_close(s, conn);
 			return;
 		}
 	}
 }
 
-static void handle_new_connection(struct server_state *s) {
+static void handle_data_available(struct server_state *s, struct conn *conn, int res) {
+	// Reset wait states from poll
+	switch (conn->state) {
+	case CONN_WAIT_READ:
+		handle_check_read(conn, res);
+		break;
+	case CONN_WAIT_WRITE:
+		handle_check_write(conn, res);
+		break;
+	case CONN_WAIT_CLOSE:
+		handle_check_close(conn, res);
+		break;
+	default:
+		// Should only be in wait state
+		assert(false);
+	}
+
+	run_conn_state_machine(s, conn);
+}
+
+static void handle_new_connection(struct server_state *s, int res) {
+	if (res < 0) {
+		fprintf(stderr, "failed to accept connection: %s\n", strerror(-res));
+		return;
+	}
+
 	struct conn *new_conn = find_available_conn(s);
 	if (new_conn == NULL) {
-		fprintf(stderr, "too many active connections\n");
-		// Hold off on new connections until a spot is available
-		struct epoll_event ev = {
-			.events = 0,
-			.data.ptr = NULL,
-		};
-		int res = epoll_ctl(s->epoll_fd, EPOLL_CTL_MOD, s->socket_fd, &ev);
-		if (res == -1) {
-			perror("could not disable epoll for listening socket");
-		}
+		fprintf(stderr, "too many active connections. Dropping.\n");
+		/*close(res);*/
 		return;
 	}
 
-	struct sockaddr_in client_addr;
-	socklen_t client_addr_len = sizeof(client_addr);
-	int conn_fd = accept(
-		s->socket_fd, (struct sockaddr *)&client_addr, &client_addr_len
-	);
-	if (conn_fd == -1) {
-		perror("failed to connect to client");
-		return;
-	}
-	if (set_nonblocking(conn_fd) == -1) {
-		perror("failed to set non-blocking");
-		return;
+	s->active_conn_count++;
+	if (s->active_conn_count < MAX_CONNS) {
+		submit_accept_req(s);
 	}
 
-	struct epoll_event ev = {
-		.events = EPOLLIN | EPOLLOUT | EPOLLET,
-		.data.ptr = new_conn,
-	};
-	int res = epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, conn_fd, &ev);
-	if (res == -1) {
-		perror("failed to add connection to epoll group");
-		return;
+	conn_init(new_conn, res);
+	fprintf(stderr, "openned connection [%d]\n", new_conn->fd);
+
+	run_conn_state_machine(s, new_conn);
+}
+
+static void handle_completion(struct server_state *s) {
+	struct io_uring_cqe *cqe;
+	int wait_res = io_uring_wait_cqe(&s->uring, &cqe);
+	if (wait_res < 0) {
+		die_errno("failed to get completion entry");
 	}
 
-	conn_init(new_conn, conn_fd);
-	fprintf(stderr, "openned connection [%d]\n", conn_fd);
-	// Check immediately in case data is available
-	handle_data_available(s, new_conn);
+	// Extract fields so the entry can be released
+	int compl_res = cqe->res;
+	void *user_data = io_uring_cqe_get_data(cqe);
+	io_uring_cqe_seen(&s->uring, cqe);
+
+	if (user_data == NULL) {
+		handle_new_connection(s, compl_res);
+	} else {
+		handle_data_available(s, user_data, compl_res);
+	}
 }
 
 int main(void) {
-	int socket_fd = setup_socket();
-
-	int epoll_fd = epoll_create1(0);
-	if (epoll_fd == -1) {
-		die_errno("failed to create epoll group");
-	}
-
-	// Setup listening socket
-	struct epoll_event ev;
-	// Leave this event as level-triggered since some connections can't be accepted right away
-	ev.events = EPOLLIN;
-	ev.data.ptr = NULL; // Tag to indicate the listening socket
-	int res = epoll_ctl(
-		epoll_fd, EPOLL_CTL_ADD, socket_fd, &ev
-	);
-	if (res == -1) {
-		die_errno("failed to add socket to epoll group");
-	}
-
 	struct server_state server;
-	server_state_init(&server, socket_fd, epoll_fd);
+	server_state_init(&server);
+
+	submit_accept_req(&server);
 
 	while (true) {
-		struct epoll_event events[MAX_EVENTS];
-		int n_events = epoll_wait(server.epoll_fd, events, MAX_EVENTS, -1);
-		if (n_events == -1) {
-			die_errno("failed to get epoll events");
-		}
-
-		for (int i = 0; i < n_events; i++) {
-			if (events[i].data.ptr == NULL) {
-				handle_new_connection(&server);
-			} else {
-				handle_data_available(&server, events[i].data.ptr);
-			}
-		}
+		handle_completion(&server);
 	}
 
 	return 0;
