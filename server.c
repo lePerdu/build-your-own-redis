@@ -316,8 +316,22 @@ static void do_set(
 	struct slice val,
 	struct response *res
 ) {
-	struct store_entry *new_ent = store_entry_alloc(key, val);
-	hash_map_insert(store, (void *)new_ent);
+	// TODO: Re-structure hashmap API to avoid double lookup
+	struct store_entry store_key = {
+		.entry.hash_code = slice_hash(key),
+		.key = key,
+	};
+
+	struct store_entry *existing = (void *)hash_map_get(
+		store, (void*)&store_key, store_ent_compare
+	);
+	if (existing == NULL) {
+		struct store_entry *new_ent = store_entry_alloc(key, val);
+		hash_map_insert(store, (void *)new_ent);
+	} else {
+		free(existing->val.data);
+		existing->val = slice_dup(val);
+	}
 
 	res->type = RES_OK;
 	res->data = make_str_slice("");
