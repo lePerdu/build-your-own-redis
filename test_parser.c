@@ -20,12 +20,15 @@ static void test_write_parse_get_req(void) {
 			.data = "abc",
 		},
 	};
-	ssize_t write_size = write_request((struct slice) {.data = buffer, .size = PROTO_MAX_MESSAGE_SIZE}, &req_out);
+	ssize_t write_size = write_request(
+		make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &req_out
+	);
 	assert(write_size > 0);
 	assert(write_size == 4 + 1 + 4 + 3);
 
 	struct request req_in;
-	ssize_t parse_size = parse_request(&req_in, (struct slice) {.data = buffer, .size = write_size});
+	ssize_t parse_size =
+		parse_request(&req_in, make_const_slice(buffer, write_size));
 	assert(parse_size > 0);
 	assert(parse_size == write_size);
 
@@ -46,12 +49,14 @@ static void test_write_parse_set_req(void) {
 			.data = "12345678",
 		},
 	};
-	ssize_t write_size = write_request((struct slice) {.data = buffer, .size = PROTO_MAX_MESSAGE_SIZE}, &req_out);
+	ssize_t write_size = write_request(make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &req_out);
 	assert(write_size > 0);
 	assert(write_size == 4 + 1 + 4 + 3 + 4 + 8);
 
 	struct request req_in;
-	ssize_t parse_size = parse_request(&req_in, (struct slice) {.data = buffer, .size = write_size});
+	ssize_t parse_size = parse_request(
+		&req_in, make_const_slice(buffer, write_size)
+	);
 	assert(parse_size > 0);
 	assert(parse_size == write_size);
 
@@ -71,12 +76,14 @@ static void test_write_parse_del_req_max_size(void) {
 			.data = max_size_data,
 		},
 	};
-	ssize_t write_size = write_request((struct slice) {.data = buffer, .size = PROTO_MAX_MESSAGE_SIZE}, &req_out);
+	ssize_t write_size = write_request(make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &req_out);
 	assert(write_size > 0);
 	assert(write_size == PROTO_MAX_MESSAGE_SIZE);
 
 	struct request req_in;
-	ssize_t parse_size = parse_request(&req_in, (struct slice) {.data = buffer, .size = write_size});
+	ssize_t parse_size = parse_request(
+		&req_in, make_const_slice(buffer, write_size)
+	);
 	assert(parse_size > 0);
 	assert(parse_size == write_size);
 
@@ -93,12 +100,16 @@ static void test_write_parse_ok_res(void) {
 			.data = "12345678",
 		},
 	};
-	ssize_t write_size = write_response((struct slice) {.data = buffer, .size = PROTO_MAX_MESSAGE_SIZE}, &res_out);
+	ssize_t write_size = write_response(
+		make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &res_out
+	);
 	assert(write_size > 0);
 	assert(write_size == 4 + 1 + 4 + 8);
 
 	struct response res_in;
-	ssize_t parse_size = parse_response(&res_in, (struct slice) {.data = buffer, .size = write_size});
+	ssize_t parse_size = parse_response(
+		&res_in, make_const_slice(buffer, write_size)
+	);
 	assert(parse_size > 0);
 	assert(parse_size == write_size);
 
@@ -118,12 +129,14 @@ static void test_write_parse_err_res_max_size(void) {
 			.data = max_size_data,
 		},
 	};
-	ssize_t write_size = write_response((struct slice) {.data = buffer, .size = PROTO_MAX_MESSAGE_SIZE}, &res_out);
+	ssize_t write_size = write_response(make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &res_out);
 	assert(write_size > 0);
 	assert(write_size == PROTO_MAX_MESSAGE_SIZE);
 
 	struct response res_in;
-	ssize_t parse_size = parse_response(&res_in, (struct slice) {.data = buffer, .size = write_size});
+	ssize_t parse_size = parse_response(
+		&res_in, make_const_slice(buffer, write_size)
+	);
 	assert(parse_size > 0);
 	assert(parse_size == write_size);
 
@@ -141,7 +154,7 @@ static void test_parse_partial_req(void) {
 
 	struct request req_in;
 	ssize_t parse_size = parse_request(
-		&req_in, (struct slice) {.data = buffer, .size = sizeof(buffer) - 4}
+		&req_in, make_const_slice(buffer, sizeof(buffer) - 4)
 	);
 	assert(parse_size == PARSE_MORE);
 }
@@ -155,7 +168,7 @@ static void test_parse_partial_req_no_header(void) {
 	};
 	struct request req_in;
 	ssize_t parse_size = parse_request(
-		&req_in, (struct slice) {.data = buffer, .size = 3}
+		&req_in, make_const_slice(buffer, 3)
 	);
 	assert(parse_size == PARSE_MORE);
 }
@@ -169,7 +182,7 @@ static void test_parse_partial_res(void) {
 	};
 	struct response res_in;
 	ssize_t parse_size = parse_response(
-		&res_in, (struct slice) {.data = buffer, .size = sizeof(buffer) - 4}
+		&res_in, make_const_slice(buffer, sizeof(buffer) - 4)
 	);
 	assert(parse_size == PARSE_MORE);
 }
@@ -183,7 +196,7 @@ static void test_parse_partial_res_no_header(void) {
 	};
 	struct response res_in;
 	ssize_t parse_size = parse_response(
-		&res_in, (struct slice) {.data = buffer, .size = 2}
+		&res_in, make_const_slice(buffer, 2)
 	);
 	assert(parse_size == PARSE_MORE);
 }
@@ -197,7 +210,7 @@ static void test_parse_invalid_req_invalid_type(void) {
 	};
 	struct request req_in;
 	ssize_t parse_size = parse_request(
-		&req_in, (struct slice) {.data = buffer, .size = sizeof(buffer)}
+		&req_in, make_const_slice(buffer, sizeof(buffer))
 	);
 	assert(parse_size == PARSE_ERR);
 }
@@ -212,7 +225,7 @@ static void test_parse_invalid_req_content_too_short(void) {
 	};
 	struct request req_in;
 	ssize_t parse_size = parse_request(
-		&req_in, (struct slice) {.data = buffer, .size = sizeof(buffer)}
+		&req_in, make_const_slice(buffer, sizeof(buffer))
 	);
 	assert(parse_size == PARSE_ERR);
 }
@@ -226,7 +239,7 @@ static void test_parse_invalid_req_over_max_size(void) {
 	};
 	struct request req_in;
 	ssize_t parse_size = parse_request(
-		&req_in, (struct slice) {.data = buffer, .size = sizeof(buffer)}
+		&req_in, make_const_slice(buffer, sizeof(buffer))
 	);
 	assert(parse_size == PARSE_ERR);
 }
@@ -240,7 +253,7 @@ static void test_parse_invalid_res_invalid_type(void) {
 	};
 	struct response res_in;
 	ssize_t parse_size = parse_response(
-		&res_in, (struct slice) {.data = buffer, .size = sizeof(buffer)}
+		&res_in, make_const_slice(buffer, sizeof(buffer))
 	);
 	assert(parse_size == PARSE_ERR);
 }
@@ -255,7 +268,7 @@ static void test_parse_invalid_res_content_too_short(void) {
 	};
 	struct response res_in;
 	ssize_t parse_size = parse_response(
-		&res_in, (struct slice) {.data = buffer, .size = sizeof(buffer)}
+		&res_in, make_const_slice(buffer, sizeof(buffer))
 	);
 	assert(parse_size == PARSE_ERR);
 }
@@ -269,7 +282,7 @@ static void test_parse_invalid_res_over_max_size(void) {
 	};
 	struct response res_in;
 	ssize_t parse_size = parse_response(
-		&res_in, (struct slice) {.data = buffer, .size = sizeof(buffer)}
+		&res_in, make_const_slice(buffer, sizeof(buffer))
 	);
 	assert(parse_size == PARSE_ERR);
 }

@@ -14,6 +14,7 @@
 
 #include "protocol.h"
 #include "hashmap.h"
+#include "value.h"
 
 #define MAX_CONNS 10
 #define MAX_EVENTS 10
@@ -41,6 +42,12 @@ struct store_entry {
 	// Owned, malloc'd slices
 	struct slice key;
 	struct slice val;
+};
+
+// Same memory layout, but with different const modifiers
+struct store_key {
+	struct hash_entry entry;
+	struct const_slice key;
 };
 
 struct server_state {
@@ -247,8 +254,8 @@ static void handle_read_req(struct conn *conn) {
 	}
 }
 
-static hash_t slice_hash(struct slice s) {
-	uint8_t *data = s.data;
+static hash_t slice_hash(struct const_slice s) {
+	const uint8_t *data = s.data;
     hash_t h = 0x811C9DC5;
     for (size_t i = 0; i < s.size; i++) {
         h = (h + data[i]) * 0x01000193;
@@ -268,10 +275,10 @@ static bool store_ent_compare(const void *raw_a, const void *raw_b) {
 
 static void do_get(
 	struct hash_map *store,
-	struct slice key,
+	struct const_slice key,
 	struct response *res
 ) {
-	struct store_entry store_key = {
+	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
 	};
@@ -286,16 +293,18 @@ static void do_get(
 	}
 
 	res->type = RES_OK;
-	res->data = entry->val;
+	res->data = to_const_slice(entry->val);
 }
 
-static struct slice slice_dup(struct slice s) {
+static struct slice slice_dup(struct const_slice s) {
 	void *copy = malloc(s.size);
 	memcpy(copy, s.data, s.size);
 	return make_slice(copy, s.size);
 }
 
-static struct store_entry *store_entry_alloc(struct slice key, struct slice val) {
+static struct store_entry *store_entry_alloc(
+	struct const_slice key, struct const_slice val
+) {
 	struct store_entry *new = malloc(sizeof(*new));
 	assert(new != NULL);
 	new->entry.hash_code = slice_hash(key);
@@ -312,12 +321,12 @@ static void store_entry_free(struct store_entry *ent) {
 
 static void do_set(
 	struct hash_map *store,
-	struct slice key,
-	struct slice val,
+	struct const_slice key,
+	struct const_slice val,
 	struct response *res
 ) {
-	// TODO: Re-structure hashmap API to avoid double lookup
-	struct store_entry store_key = {
+	// TODO: Re-structure hashmap API to avoid double lookup when inserting?
+	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
 	};
@@ -339,10 +348,10 @@ static void do_set(
 
 static void do_del(
 	struct hash_map *store,
-	struct slice key,
+	struct const_slice key,
 	struct response *res
 ) {
-	struct store_entry store_key = {
+	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
 	};

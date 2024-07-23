@@ -13,9 +13,15 @@ static inline void slice_advance(struct slice *s, size_t n) {
 	s->data += n;
 }
 
+static inline void const_slice_advance(struct const_slice *s, size_t n) {
+	assert(n <= s->size);
+	s->size -= n;
+	s->data += n;
+}
+
 #define STR_LEN_SIZE 4
 
-static ssize_t write_string(struct slice buffer, struct slice s) {
+static ssize_t write_string(struct slice buffer, struct const_slice s) {
 	if (buffer.size < STR_LEN_SIZE + s.size) {
 		return -1;
 	}
@@ -97,14 +103,14 @@ ssize_t write_response(
 	return total_size;
 }
 
-static ssize_t parse_string(struct slice *s, struct slice buffer) {
+static ssize_t parse_string(struct const_slice *s, struct const_slice buffer) {
 	if (buffer.size < STR_LEN_SIZE) {
 		return -1;
 	}
 
 	message_len_t str_len;
 	memcpy(&str_len, buffer.data, STR_LEN_SIZE);
-	slice_advance(&buffer, STR_LEN_SIZE);
+	const_slice_advance(&buffer, STR_LEN_SIZE);
 
 	if (buffer.size < str_len) {
 		return -1;
@@ -115,8 +121,8 @@ static ssize_t parse_string(struct slice *s, struct slice buffer) {
 	return STR_LEN_SIZE + str_len;
 }
 
-ssize_t parse_request(struct request *req, struct slice buffer) {
-	void *init_buf_start = buffer.data;
+ssize_t parse_request(struct request *req, struct const_slice buffer) {
+	const void *init_buf_start = buffer.data;
 
 	if (buffer.size < PROTO_HEADER_SIZE) {
 		return PARSE_MORE;
@@ -124,7 +130,7 @@ ssize_t parse_request(struct request *req, struct slice buffer) {
 
 	message_len_t message_len;
 	memcpy(&message_len, buffer.data, PROTO_HEADER_SIZE);
-	slice_advance(&buffer, PROTO_HEADER_SIZE);
+	const_slice_advance(&buffer, PROTO_HEADER_SIZE);
 
 	if (message_len > PROTO_MAX_PAYLOAD_SIZE) {
 		return PARSE_ERR;
@@ -136,7 +142,7 @@ ssize_t parse_request(struct request *req, struct slice buffer) {
 	buffer.size = message_len;
 
 	req->type = ((const uint8_t *) buffer.data)[0];
-	slice_advance(&buffer, 1);
+	const_slice_advance(&buffer, 1);
 	ssize_t sub_res;
 	switch (req->type) {
 		case REQ_GET:
@@ -145,20 +151,20 @@ ssize_t parse_request(struct request *req, struct slice buffer) {
 			if (sub_res < 0) {
 				return PARSE_ERR;
 			}
-			slice_advance(&buffer, sub_res);
+			const_slice_advance(&buffer, sub_res);
 			break;
 		case REQ_SET:
 			sub_res = parse_string(&req->key, buffer);
 			if (sub_res < 0) {
 				return PARSE_ERR;
 			}
-			slice_advance(&buffer, sub_res);
+			const_slice_advance(&buffer, sub_res);
 
 			sub_res = parse_string(&req->val, buffer);
 			if (sub_res < 0) {
 				return PARSE_ERR;
 			}
-			slice_advance(&buffer, sub_res);
+			const_slice_advance(&buffer, sub_res);
 			break;
 		default:
 			return PARSE_ERR;
@@ -172,8 +178,8 @@ ssize_t parse_request(struct request *req, struct slice buffer) {
 	return buffer.data - init_buf_start;
 }
 
-ssize_t parse_response(struct response *res, struct slice buffer) {
-	void *init_buf_start = buffer.data;
+ssize_t parse_response(struct response *res, struct const_slice buffer) {
+	const void *init_buf_start = buffer.data;
 
 	if (buffer.size < PROTO_HEADER_SIZE) {
 		return PARSE_MORE;
@@ -181,7 +187,7 @@ ssize_t parse_response(struct response *res, struct slice buffer) {
 
 	message_len_t message_len;
 	memcpy(&message_len, buffer.data, PROTO_HEADER_SIZE);
-	slice_advance(&buffer, PROTO_HEADER_SIZE);
+	const_slice_advance(&buffer, PROTO_HEADER_SIZE);
 
 	if (message_len > PROTO_MAX_PAYLOAD_SIZE) {
 		return PARSE_ERR;
@@ -200,13 +206,13 @@ ssize_t parse_response(struct response *res, struct slice buffer) {
 		default:
 			return PARSE_ERR;
 	}
-	slice_advance(&buffer, 1);
+	const_slice_advance(&buffer, 1);
 
 	ssize_t sub_res = parse_string(&res->data, buffer);
 	if (sub_res < 0) {
 		return PARSE_ERR;
 	}
-	slice_advance(&buffer, sub_res);
+	const_slice_advance(&buffer, sub_res);
 
 	if (buffer.size > 0) {
 		// Shouldn't be extra data

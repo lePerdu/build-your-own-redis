@@ -2,7 +2,6 @@
 #define PROTOCOL_H_
 
 #include <assert.h>
-#include <bits/types/struct_iovec.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,25 +16,30 @@ static_assert(
 	sizeof(message_len_t) == PROTO_HEADER_SIZE, "incorrect message length type"
 );
 
+struct slice {
+	size_t size;
+	void *data;
+};
+
+struct const_slice {
+	size_t size;
+	const void *data;
+};
+
 enum req_type {
 	REQ_GET = 0,
 	REQ_SET = 1,
 	REQ_DEL = 2,
 };
 
-struct slice {
-	size_t size;
-	void *data;
-};
-
 struct request {
 	enum req_type type;
-	struct slice key;
+	struct const_slice key;
 
 	/**
 	 * Only used for SET
 	 */
-	struct slice val;
+	struct const_slice val;
 };
 
 enum parse_result {
@@ -51,7 +55,7 @@ enum res_type {
 
 struct response {
 	enum res_type type;
-	struct slice data;
+	struct const_slice data;
 };
 
 enum write_result {
@@ -63,22 +67,30 @@ static inline struct slice make_slice(void *data, size_t size) {
 	return (struct slice) {.size = size, .data = data};
 }
 
-static inline struct slice make_str_slice(const char *str) {
-	return (struct slice) {.size = strlen(str), .data = (void *)str};
+static inline struct const_slice make_const_slice(const void *data, size_t size) {
+	return (struct const_slice) {.size = size, .data = data};
+}
+
+static inline struct const_slice make_str_slice(const char *str) {
+	return make_const_slice(str, strlen(str));
+}
+
+static inline struct const_slice to_const_slice(struct slice s) {
+	return make_const_slice(s.data, s.size);
 }
 
 ssize_t write_request(
 	struct slice buffer,
 	const struct request *req
 );
-ssize_t parse_request(struct request *req, struct slice buffer);
+ssize_t parse_request(struct request *req, struct const_slice buffer);
 void print_request(FILE *stream, const struct request *req);
 
 ssize_t write_response(
 	struct slice buffer,
 	const struct response *res
 );
-ssize_t parse_response(struct response *res, struct slice buffer);
+ssize_t parse_response(struct response *res, struct const_slice buffer);
 void print_response(FILE *stream, const struct response *res);
 
 struct read_buf {
@@ -116,11 +128,8 @@ static inline void read_buf_advance(struct read_buf *r, size_t incr) {
 	r->buf_size -= incr;
 }
 
-static inline struct slice read_buf_head_slice(struct read_buf *w) {
-	return (struct slice) {
-		.size = read_buf_size(w),
-		.data = read_buf_start_pos(w)
-	};
+static inline struct const_slice read_buf_head_slice(struct read_buf *r) {
+	return make_const_slice(read_buf_start_pos(r), read_buf_size(r));
 }
 
 /**
@@ -145,11 +154,8 @@ static inline void read_buf_inc_size(struct read_buf *r, size_t incr) {
 	assert(r->buf_size <= sizeof(r->buf));
 }
 
-static inline struct slice read_buf_tail_slice(struct read_buf *w) {
-	return (struct slice) {
-		.size = read_buf_cap(w),
-		.data = read_buf_read_pos(w)
-	};
+static inline struct slice read_buf_tail_slice(struct read_buf *r) {
+	return make_slice(read_buf_read_pos(r), read_buf_cap(r));
 }
 
 struct write_buf {
@@ -183,11 +189,8 @@ static inline void write_buf_advance(struct write_buf *w, size_t n) {
 	w->buf_sent += n;
 }
 
-static inline struct slice write_buf_head_slice(struct write_buf *w) {
-	return (struct slice) {
-		.size = write_buf_remaining(w),
-		.data = write_buf_write_pos(w)
-	};
+static inline struct const_slice write_buf_head_slice(struct write_buf *w) {
+	return make_const_slice(write_buf_write_pos(w), write_buf_remaining(w));
 }
 
 static inline void *write_buf_tail(struct write_buf *w) {
@@ -210,10 +213,7 @@ static inline void write_buf_inc_size(struct write_buf *rw, size_t incr) {
 }
 
 static inline struct slice write_buf_tail_slice(struct write_buf *w) {
-	return (struct slice) {
-		.size = write_buf_capacity(w),
-		.data = write_buf_tail(w)
-	};
+	return make_slice(write_buf_tail(w), write_buf_capacity(w));
 }
 
 static inline void write_buf_reset(struct write_buf *w) {

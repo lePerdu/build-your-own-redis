@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "protocol.h"
+#include "value.h"
 
 [[noreturn]] static void die_errno(const char *msg) {
 	perror(msg);
@@ -69,7 +70,7 @@ static ssize_t read_one_response(
 	}
 
 	ssize_t res_size = parse_response(
-		res, (struct slice){ .size = PROTO_MAX_MESSAGE_SIZE, .data = buf}
+		res, make_const_slice(buf, PROTO_MAX_MESSAGE_SIZE)
 	);
 	if (res_size != PROTO_HEADER_SIZE + message_len) {
 		return -1;
