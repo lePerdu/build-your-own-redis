@@ -3,14 +3,17 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <errno.h>
 
 #include "protocol.h"
+#include "hashmap.h"
 
 #define MAX_CONNS 10
 #define MAX_EVENTS 10
@@ -27,13 +30,25 @@ enum conn_state {
 struct conn {
 	int fd;
 	enum conn_state state;
+
 	struct read_buf read_buf;
 	struct write_buf write_buf;
+};
+
+struct store_entry {
+	struct hash_entry entry;
+
+	// Owned, malloc'd slices
+	struct slice key;
+	struct slice val;
 };
 
 struct server_state {
 	int socket_fd;
 	int epoll_fd;
+
+	struct hash_map store;
+
 	// TODO: better data structure for faster searching
 	struct conn active_connections[MAX_CONNS];
 };
@@ -48,6 +63,7 @@ static void conn_init(struct conn *c, int fd) {
 static void server_state_init(struct server_state *s, int socket_fd, int epoll_fd) {
 	s->socket_fd = socket_fd;
 	s->epoll_fd = epoll_fd;
+	hash_map_init(&s->store, 16);
 	for (int i = 0; i < MAX_CONNS; i++) {
 		s->active_connections[i].fd = -1;
 	}
@@ -231,18 +247,128 @@ static void handle_read_req(struct conn *conn) {
 	}
 }
 
-static int do_request(struct conn *conn, const struct request *req) {
+static hash_t slice_hash(struct slice s) {
+	uint8_t *data = s.data;
+    hash_t h = 0x811C9DC5;
+    for (size_t i = 0; i < s.size; i++) {
+        h = (h + data[i]) * 0x01000193;
+    }
+    return h;
+}
+
+static bool store_ent_compare(const void *raw_a, const void *raw_b) {
+	const struct store_entry *a = raw_a;
+	const struct store_entry *b = raw_b;
+
+	return (
+		a->key.size == b->key.size
+		&& memcmp(a->key.data, b->key.data, a->key.size) == 0
+	);
+}
+
+static void do_get(
+	struct hash_map *store,
+	struct slice key,
+	struct response *res
+) {
+	struct store_entry store_key = {
+		.entry.hash_code = slice_hash(key),
+		.key = key,
+	};
+
+	struct store_entry *entry = (void *)hash_map_get(
+		store, (void*)&store_key, store_ent_compare
+	);
+	if (entry == NULL) {
+		res->type = RES_ERR;
+		res->data = make_str_slice("not found");
+		return;
+	}
+
+	res->type = RES_OK;
+	res->data = entry->val;
+}
+
+static struct slice slice_dup(struct slice s) {
+	void *copy = malloc(s.size);
+	memcpy(copy, s.data, s.size);
+	return make_slice(copy, s.size);
+}
+
+static struct store_entry *store_entry_alloc(struct slice key, struct slice val) {
+	struct store_entry *new = malloc(sizeof(*new));
+	assert(new != NULL);
+	new->entry.hash_code = slice_hash(key);
+	new->key = slice_dup(key);
+	new->val = slice_dup(val);
+	return new;
+}
+
+static void store_entry_free(struct store_entry *ent) {
+	free(ent->key.data);
+	free(ent->val.data);
+	free(ent);
+}
+
+static void do_set(
+	struct hash_map *store,
+	struct slice key,
+	struct slice val,
+	struct response *res
+) {
+	struct store_entry *new_ent = store_entry_alloc(key, val);
+	hash_map_insert(store, (void *)new_ent);
+
+	res->type = RES_OK;
+	res->data = make_str_slice("");
+}
+
+static void do_del(
+	struct hash_map *store,
+	struct slice key,
+	struct response *res
+) {
+	struct store_entry store_key = {
+		.entry.hash_code = slice_hash(key),
+		.key = key,
+	};
+
+	struct store_entry *entry = (void *)hash_map_delete(
+		store, (void*)&store_key, store_ent_compare
+	);
+	if (entry == NULL) {
+		res->type = RES_ERR;
+		res->data = make_str_slice("not found");
+		return;
+	}
+	store_entry_free(entry);
+
+	res->type = RES_OK;
+	res->data = make_str_slice("");
+}
+
+static int do_request(
+	struct conn *conn, struct hash_map *store, const struct request *req
+) {
 	fprintf(stderr, "from client [%d]: ", conn->fd);
 	print_request(stderr, req);
 	putc('\n', stderr);
 
-	struct response res = {
-		.type = RES_ERR,
-		.data = {
-			.size = 4,
-			.data = "nope",
-		},
-	};
+	struct response res;
+	switch (req->type) {
+        case REQ_GET:
+			do_get(store, req->key, &res);
+			break;
+        case REQ_SET:
+			do_set(store, req->key, req->val, &res);
+			break;
+        case REQ_DEL:
+			do_del(store, req->key, &res);
+			break;
+		default:
+			assert(false);
+	}
+
 	fprintf(stderr, "to client [%d]: ", conn->fd);
 	print_response(stderr, &res);
 	putc('\n', stderr);
@@ -257,7 +383,7 @@ static int do_request(struct conn *conn, const struct request *req) {
 	return 0;
 }
 
-static void handle_process_req(struct conn *conn) {
+static void handle_process_req(struct conn *conn, struct hash_map *store) {
 	struct request req;
 	ssize_t msg_size = parse_request(&req, read_buf_head_slice(&conn->read_buf));
 	switch (msg_size) {
@@ -273,7 +399,7 @@ static void handle_process_req(struct conn *conn) {
 	assert(msg_size >= 0);
 	read_buf_advance(&conn->read_buf, msg_size);
 
-	int res = do_request(conn, &req);
+	int res = do_request(conn, store, &req);
 	if (res < 0) {
 		conn->state = CONN_CLOSE;
 	}
@@ -336,7 +462,7 @@ static void handle_data_available(struct server_state *s, struct conn *conn) {
 			handle_read_req(conn);
 			break;
 		case CONN_PROCESS_REQ:
-			handle_process_req(conn);
+			handle_process_req(conn, &s->store);
 			break;
 		case CONN_WRITE_RES:
 			handle_write_res(conn);

@@ -110,41 +110,19 @@ int main(int argc, char *argv[argc]) {
 
 	fprintf(stderr, "openned connection [%d]\n", fd);
 
+	const char *key;
+	if (argc == 2) {
+		key = argv[1];
+	} else {
+		key = "abc";
+	}
+
 	struct request req;
 	uint8_t write_buf[PROTO_MAX_MESSAGE_SIZE];
 	ssize_t n_write;
 
-	req.type = REQ_SET;
-	req.key = make_str_slice("abc");
-	req.val = make_str_slice("12345");
-	n_write = write_one_request(fd, write_buf, &req);
-	if (n_write == -1) {
-		die_errno("failed to write message");
-	}
-	fprintf(stderr, "to server: ");
-	print_request(stderr, &req);
-	putc('\n', stderr);
-	sleep(1);
-
-	const char *msg;
-	if (argc == 2) {
-		msg = argv[1];
-	} else {
-		msg = "hello";
-	}
 	req.type = REQ_GET;
-	req.key = make_str_slice(msg);
-	n_write = write_one_request(fd, write_buf, &req);
-	if (n_write == -1) {
-		die_errno("failed to write message");
-	}
-	fprintf(stderr, "to server: ");
-	print_request(stderr, &req);
-	putc('\n', stderr);
-	sleep(1);
-
-	req.type = REQ_DEL;
-	req.key = make_str_slice("someone");
+	req.key = make_str_slice(key);
 	n_write = write_one_request(fd, write_buf, &req);
 	if (n_write == -1) {
 		die_errno("failed to write message");
@@ -158,22 +136,6 @@ int main(int argc, char *argv[argc]) {
 
 	uint8_t read_buf[PROTO_MAX_MESSAGE_SIZE];
 	ssize_t n_read;
-
-	n_read = read_one_response(fd, read_buf, &res);
-	if (n_read == -1) {
-		die_errno("failed to read response");
-	}
-	fprintf(stderr, "from server: ");
-	print_response(stderr, &res);
-	putc('\n', stderr);
-
-	n_read = read_one_response(fd, read_buf, &res);
-	if (n_read == -1) {
-		die_errno("failed to read response");
-	}
-	fprintf(stderr, "from server: ");
-	print_response(stderr, &res);
-	putc('\n', stderr);
 
 	n_read = read_one_response(fd, read_buf, &res);
 	if (n_read == -1) {
