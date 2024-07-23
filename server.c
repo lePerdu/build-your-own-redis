@@ -1,16 +1,12 @@
 #include <arpa/inet.h>
 #include <assert.h>
-#include <bits/types/struct_iovec.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
-#include <sys/types.h>
-#include <time.h>
 #include <unistd.h>
 #include <errno.h>
 
@@ -161,7 +157,7 @@ static enum read_result read_buf_fill(int fd, struct read_buf *r) {
 	ssize_t n_read;
 	// Repeat for EINTR
 	do {
-		n_read = read(fd, read_buf_read_pos(r), cap);
+		n_read = recv(fd, read_buf_read_pos(r), cap, 0);
 	} while (n_read == -1 && errno == EINTR);
 
 	if (n_read == -1) {
@@ -191,7 +187,7 @@ static enum send_result write_buf_flush(int fd, struct write_buf *w) {
 
 	ssize_t n_write;
 	do {
-		n_write = write(fd, write_buf_write_pos(w), remaining);
+		n_write = send(fd, write_buf_write_pos(w), remaining, MSG_NOSIGNAL);
 	} while (n_write == -1 && errno == EINTR);
 
 	if (n_write == -1) {
@@ -235,9 +231,35 @@ static void handle_read_req(struct conn *conn) {
 	}
 }
 
+static int do_request(struct conn *conn, const struct request *req) {
+	fprintf(stderr, "from client [%d]: ", conn->fd);
+	print_request(stderr, req);
+	putc('\n', stderr);
+
+	struct response res = {
+		.type = RES_ERR,
+		.data = {
+			.size = 4,
+			.data = "nope",
+		},
+	};
+	fprintf(stderr, "to client [%d]: ", conn->fd);
+	print_response(stderr, &res);
+	putc('\n', stderr);
+
+	ssize_t res_size = write_response(write_buf_tail_slice(&conn->write_buf), &res);
+	if (res_size < 0) {
+		fprintf(stderr, "failed to write response to buffer");
+		return -1;
+	}
+	write_buf_inc_size(&conn->write_buf, res_size);
+
+	return 0;
+}
+
 static void handle_process_req(struct conn *conn) {
-	uint8_t msg_buf[PROTO_MAX_PAYLOAD_SIZE + 1];
-	ssize_t msg_size = read_buf_parse(&conn->read_buf, msg_buf);
+	struct request req;
+	ssize_t msg_size = parse_request(&req, read_buf_head_slice(&conn->read_buf));
 	switch (msg_size) {
 		case PARSE_ERR:
 			fprintf(stderr, "invalid message\n");
@@ -249,11 +271,12 @@ static void handle_process_req(struct conn *conn) {
 	}
 
 	assert(msg_size >= 0);
-	msg_buf[msg_size] = 0;
-	printf("from client [%d]: %s\n", conn->fd, msg_buf);
+	read_buf_advance(&conn->read_buf, msg_size);
 
-	write_buf_set_message(&conn->write_buf, msg_buf, msg_size);
-
+	int res = do_request(conn, &req);
+	if (res < 0) {
+		conn->state = CONN_CLOSE;
+	}
 	conn->state = CONN_WRITE_RES;
 }
 

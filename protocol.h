@@ -4,6 +4,8 @@
 #include <assert.h>
 #include <bits/types/struct_iovec.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #include <sys/types.h>
 
 #define PROTO_HEADER_SIZE 4
@@ -57,17 +59,27 @@ enum write_result {
 	WRITE_ERR = -1,
 };
 
+static inline struct slice make_slice(void *data, size_t size) {
+	return (struct slice) {.size = size, .data = data};
+}
+
+static inline struct slice make_str_slice(const char *str) {
+	return (struct slice) {.size = strlen(str), .data = (void *)str};
+}
+
 ssize_t write_request(
 	struct slice buffer,
-	struct request *req
+	const struct request *req
 );
 ssize_t parse_request(struct request *req, struct slice buffer);
+void print_request(FILE *stream, const struct request *req);
 
 ssize_t write_response(
 	struct slice buffer,
-	struct response *res
+	const struct response *res
 );
 ssize_t parse_response(struct response *res, struct slice buffer);
+void print_response(FILE *stream, const struct response *res);
 
 struct read_buf {
 	size_t buf_start;
@@ -104,6 +116,13 @@ static inline void read_buf_advance(struct read_buf *r, size_t incr) {
 	r->buf_size -= incr;
 }
 
+static inline struct slice read_buf_head_slice(struct read_buf *w) {
+	return (struct slice) {
+		.size = read_buf_size(w),
+		.data = read_buf_start_pos(w)
+	};
+}
+
 /**
  * Position into which more data can be read.
  */
@@ -126,11 +145,12 @@ static inline void read_buf_inc_size(struct read_buf *r, size_t incr) {
 	assert(r->buf_size <= sizeof(r->buf));
 }
 
-/**
- * Try to parse 1 message from the buffer. Can return a `parse_result` in case of
- * error or more data is required. Returns the size of the message otherwise.
- */
-ssize_t read_buf_parse(struct read_buf *r, uint8_t buf[PROTO_MAX_PAYLOAD_SIZE]);
+static inline struct slice read_buf_tail_slice(struct read_buf *w) {
+	return (struct slice) {
+		.size = read_buf_cap(w),
+		.data = read_buf_read_pos(w)
+	};
+}
 
 struct write_buf {
 	size_t buf_size;
@@ -163,14 +183,42 @@ static inline void write_buf_advance(struct write_buf *w, size_t n) {
 	w->buf_sent += n;
 }
 
+static inline struct slice write_buf_head_slice(struct write_buf *w) {
+	return (struct slice) {
+		.size = write_buf_remaining(w),
+		.data = write_buf_write_pos(w)
+	};
+}
+
+static inline void *write_buf_tail(struct write_buf *w) {
+	return &w->buf[w->buf_size];
+}
+
+/**
+ * Available remaining capacity.
+ */
+static inline size_t write_buf_capacity(const struct write_buf *w) {
+	return sizeof(w->buf) - w->buf_size;
+}
+
+/**
+ * Advance the end of the buffer after writing data into the tail.
+ */
+static inline void write_buf_inc_size(struct write_buf *rw, size_t incr) {
+	rw->buf_size += incr;
+	assert(rw->buf_size <= sizeof(rw->buf));
+}
+
+static inline struct slice write_buf_tail_slice(struct write_buf *w) {
+	return (struct slice) {
+		.size = write_buf_capacity(w),
+		.data = write_buf_tail(w)
+	};
+}
+
 static inline void write_buf_reset(struct write_buf *w) {
 	w->buf_sent = 0;
 	w->buf_size = 0;
 }
-
-/**
- * Copy data into the write buffer.
- */
-void write_buf_set_message(struct write_buf *w, const void *buf, size_t size);
 
 #endif

@@ -1,5 +1,7 @@
 #include <bits/types/struct_iovec.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 
@@ -29,7 +31,7 @@ static ssize_t write_string(struct slice buffer, struct slice s) {
 
 ssize_t write_request(
 	struct slice buffer,
-	struct request *req
+	const struct request *req
 ) {
 	void *init_buf_start = buffer.data;
 	// Write the total size at the end once it's known
@@ -73,7 +75,7 @@ ssize_t write_request(
 
 ssize_t write_response(
 	struct slice buffer,
-	struct response *res
+	const struct response *res
 ) {
 	size_t total_size = PROTO_HEADER_SIZE + 1 + STR_LEN_SIZE + res->data.size;
 	if (total_size > buffer.size) {
@@ -214,6 +216,47 @@ ssize_t parse_response(struct response *res, struct slice buffer) {
 	return buffer.data - init_buf_start;
 }
 
+void print_request(FILE *stream, const struct request *req) {
+	switch (req->type) {
+        case REQ_GET:
+			fprintf(stream, "GET %.*s", (int)req->key.size, (char *)req->key.data);
+			break;
+        case REQ_SET:
+			fprintf(
+				stream,
+				"SET %.*s %.*s",
+				(int)req->key.size,
+				(char *)req->key.data,
+				(int)req->val.size,
+				(char *)req->val.data
+			);
+			break;
+        case REQ_DEL:
+			fprintf(stream, "DEL %.*s", (int)req->key.size, (char *)req->key.data);
+			break;
+		default:
+			assert(false);
+	}
+}
+
+void print_response(FILE *stream, const struct response *res) {
+	switch (res->type) {
+        case RES_OK:
+			fprintf(stream, "OK %.*s", (int)res->data.size, (char *)res->data.data);
+			break;
+        case RES_ERR:
+			fprintf(
+				stream,
+				"ERR %.*s",
+				(int)res->data.size,
+				(char *)res->data.data
+			);
+			break;
+		default:
+			assert(false);
+	}
+}
+
 void read_buf_init(struct read_buf *r) {
 	r->buf_start = 0;
 	r->buf_size = 0;
@@ -227,37 +270,7 @@ void read_buf_reset_start(struct read_buf *r) {
 	r->buf_start = 0;
 }
 
-ssize_t read_buf_parse(struct read_buf *r, uint8_t buf[PROTO_MAX_PAYLOAD_SIZE]) {
-	if (r->buf_size < PROTO_HEADER_SIZE) {
-		return PARSE_MORE;
-	}
-
-	message_len_t message_len;
-	memcpy(&message_len, read_buf_start_pos(r), PROTO_HEADER_SIZE);
-
-	if (message_len > PROTO_MAX_PAYLOAD_SIZE) {
-		return PARSE_ERR;
-	} else if (message_len + PROTO_HEADER_SIZE > r->buf_size) {
-		return PARSE_MORE;
-	}
-
-	memcpy(buf, read_buf_start_pos(r) + PROTO_HEADER_SIZE, message_len);
-	size_t total_message_size = PROTO_HEADER_SIZE + message_len;
-	read_buf_advance(r, total_message_size);
-
-	return message_len;
-}
-
 void write_buf_init(struct write_buf *w) {
 	w->buf_size = 0;
 	w->buf_sent = 0;
-}
-
-void write_buf_set_message(struct write_buf *w, const void *buf, size_t size) {
-	assert(size <= PROTO_MAX_PAYLOAD_SIZE);
-	assert(w->buf_size == 0);
-	message_len_t message_len = size;
-	memcpy(w->buf, &message_len, PROTO_HEADER_SIZE);
-	memcpy(&w->buf[PROTO_HEADER_SIZE], buf, size);
-	w->buf_size = size + 4;
 }

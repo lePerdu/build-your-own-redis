@@ -39,7 +39,7 @@ static int setup_socket(void) {
 static ssize_t read_exact(int fd, void *buf, size_t size) {
 	size_t remaining = size;
 	while (remaining > 0) {
-		ssize_t n_read = read(fd, buf, remaining);
+		ssize_t n_read = recv(fd, buf, remaining, 0);
 		if (n_read <= 0) {
 			// TODO Report specific error, like with errno?
 			return -1;
@@ -51,29 +51,36 @@ static ssize_t read_exact(int fd, void *buf, size_t size) {
 	return size;
 }
 
-static ssize_t read_one_message(int fd, void *buf, size_t size) {
-	message_len_t message_len;
-
-	if (read_exact(fd, &message_len, PROTO_HEADER_SIZE) == -1) {
+static ssize_t read_one_response(
+	int fd, uint8_t buf[PROTO_MAX_MESSAGE_SIZE], struct response *res
+) {
+	if (read_exact(fd, buf, PROTO_HEADER_SIZE) == -1) {
 		return -1;
 	}
+	message_len_t message_len;
+	memcpy(&message_len, buf, PROTO_HEADER_SIZE);
 
 	if (message_len > PROTO_MAX_PAYLOAD_SIZE) {
 		return -1;
 	}
 
-	if (message_len > size) {
-		// TODO Read rest of the message to "reset" the protocol?
+	if (read_exact(fd, &buf[PROTO_HEADER_SIZE], message_len) == -1) {
 		return -1;
 	}
 
-	return read_exact(fd, buf, message_len);
+	ssize_t res_size = parse_response(
+		res, (struct slice){ .size = PROTO_MAX_MESSAGE_SIZE, .data = buf}
+	);
+	if (res_size != PROTO_HEADER_SIZE + message_len) {
+		return -1;
+	}
+	return res_size;
 }
 
 static ssize_t write_exact(int fd, const void *buf, size_t size) {
 	size_t remaining = size;
 	while (remaining > 0) {
-		ssize_t n_write = write(fd, buf, remaining);
+		ssize_t n_write = send(fd, buf, remaining, MSG_NOSIGNAL);
 		if (n_write <= 0) {
 			// TODO Report specific error, like with errno?
 			return -1;
@@ -85,17 +92,17 @@ static ssize_t write_exact(int fd, const void *buf, size_t size) {
 	return size;
 }
 
-static ssize_t write_one_message(int fd, const void *buf, size_t size) {
-	if (size > PROTO_MAX_PAYLOAD_SIZE) {
+static ssize_t write_one_request(
+	int fd, uint8_t buf[PROTO_MAX_MESSAGE_SIZE], const struct request *req
+) {
+	ssize_t req_size = write_request(
+		(struct slice){.size = PROTO_MAX_MESSAGE_SIZE, .data = buf}, req
+	);
+	if (req_size < 0) {
 		return -1;
 	}
 
-	message_len_t message_len = size;
-	if (write_exact(fd, &message_len, PROTO_HEADER_SIZE) == -1) {
-		return -1;
-	}
-
-	return write_exact(fd, buf, size);
+	return write_exact(fd, buf, req_size);
 }
 
 int main(int argc, char *argv[argc]) {
@@ -103,72 +110,81 @@ int main(int argc, char *argv[argc]) {
 
 	fprintf(stderr, "openned connection [%d]\n", fd);
 
-	const char *msg;
+	struct request req;
+	uint8_t write_buf[PROTO_MAX_MESSAGE_SIZE];
 	ssize_t n_write;
 
-	msg = "[[";
-	n_write = write_one_message(fd, msg, strlen(msg));
+	req.type = REQ_SET;
+	req.key = make_str_slice("abc");
+	req.val = make_str_slice("12345");
+	n_write = write_one_request(fd, write_buf, &req);
 	if (n_write == -1) {
 		die_errno("failed to write message");
 	}
-	printf("to server: %s\n", msg);
+	fprintf(stderr, "to server: ");
+	print_request(stderr, &req);
+	putc('\n', stderr);
 	sleep(1);
 
+	const char *msg;
 	if (argc == 2) {
 		msg = argv[1];
 	} else {
 		msg = "hello";
 	}
-
-	uint8_t filled[PROTO_MAX_PAYLOAD_SIZE];
-	memset(filled, 'A', sizeof(filled));
-	msg = filled;
-	n_write = write_one_message(fd, msg, sizeof(filled));
+	req.type = REQ_GET;
+	req.key = make_str_slice(msg);
+	n_write = write_one_request(fd, write_buf, &req);
 	if (n_write == -1) {
 		die_errno("failed to write message");
 	}
-	printf("to server: %s\n", msg);
+	fprintf(stderr, "to server: ");
+	print_request(stderr, &req);
+	putc('\n', stderr);
 	sleep(1);
 
-	msg = "]]";
-	n_write = write_one_message(fd, msg, strlen(msg));
+	req.type = REQ_DEL;
+	req.key = make_str_slice("someone");
+	n_write = write_one_request(fd, write_buf, &req);
 	if (n_write == -1) {
 		die_errno("failed to write message");
 	}
-	printf("to server: %s\n", msg);
+	fprintf(stderr, "to server: ");
+	print_request(stderr, &req);
+	putc('\n', stderr);
 	sleep(1);
 
-	char rbuf[PROTO_MAX_PAYLOAD_SIZE + 1];
+	struct response res;
+
+	uint8_t read_buf[PROTO_MAX_MESSAGE_SIZE];
 	ssize_t n_read;
-	n_read = read_one_message(fd, rbuf, sizeof(rbuf) - 1);
+
+	n_read = read_one_response(fd, read_buf, &res);
 	if (n_read == -1) {
 		die_errno("failed to read response");
 	}
-	rbuf[n_read] = 0;
+	fprintf(stderr, "from server: ");
+	print_response(stderr, &res);
+	putc('\n', stderr);
 
-	printf("from server: %s\n", rbuf);
-
-	n_read = read_one_message(fd, rbuf, sizeof(rbuf) - 1);
+	n_read = read_one_response(fd, read_buf, &res);
 	if (n_read == -1) {
 		die_errno("failed to read response");
 	}
-	rbuf[n_read] = 0;
-	sleep(1);
+	fprintf(stderr, "from server: ");
+	print_response(stderr, &res);
+	putc('\n', stderr);
 
-	printf("from server: %s\n", rbuf);
-
-	n_read = read_one_message(fd, rbuf, sizeof(rbuf) - 1);
+	n_read = read_one_response(fd, read_buf, &res);
 	if (n_read == -1) {
 		die_errno("failed to read response");
 	}
-	rbuf[n_read] = 0;
-	sleep(1);
+	fprintf(stderr, "from server: ");
+	print_response(stderr, &res);
+	putc('\n', stderr);
 
-	printf("from server: %s\n", rbuf);
-	sleep(1);
-
-	int res = close(fd);
-	if (res == -1) {
+	int close_res = close(fd);
+	if (close_res == -1) {
 		die_errno("failed to close connection");
 	}
 	fprintf(stderr, "closed connection [%d]\n", fd);
