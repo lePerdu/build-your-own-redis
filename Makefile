@@ -1,4 +1,4 @@
-CFLAGS = -std=c11 -Wall -Wextra -Og -g
+CFLAGS = -std=c17 -Wall -Wextra -Og -g
 
 BUILD = build
 BIN = bin
