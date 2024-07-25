@@ -14,10 +14,8 @@
 
 #include "protocol.h"
 #include "hashmap.h"
-#include "value.h"
 
-#define MAX_CONNS 10
-#define MAX_EVENTS 10
+#define MAX_EVENTS 256
 
 enum conn_state {
 	CONN_WAIT_READ,
@@ -29,6 +27,10 @@ enum conn_state {
 };
 
 struct conn {
+	// Linked list pointers for managing connection pool
+	struct conn *prev;
+	struct conn *next;
+
 	int fd;
 	enum conn_state state;
 
@@ -56,8 +58,10 @@ struct server_state {
 
 	struct hash_map store;
 
-	// TODO: better data structure for faster searching
-	struct conn active_connections[MAX_CONNS];
+	// Free-list of connection objects
+	struct conn *connection_pool;
+	// active connection objects
+	struct conn *active_connections;
 };
 
 static void conn_init(struct conn *c, int fd) {
@@ -71,18 +75,41 @@ static void server_state_init(struct server_state *s, int socket_fd, int epoll_f
 	s->socket_fd = socket_fd;
 	s->epoll_fd = epoll_fd;
 	hash_map_init(&s->store, 16);
-	for (int i = 0; i < MAX_CONNS; i++) {
-		s->active_connections[i].fd = -1;
-	}
+	s->connection_pool = NULL;
+	s->active_connections = NULL;
 }
 
-static struct conn *find_available_conn(struct server_state *s) {
-	for (int i = 0; i < MAX_CONNS; i++) {
-		if (s->active_connections[i].fd == -1) {
-			return &s->active_connections[i];
-		}
+static struct conn *get_available_conn(struct server_state *s) {
+	struct conn *available = s->connection_pool;
+	if (available != NULL) {
+		// prev pointers aren't used in the connection pool
+		s->connection_pool = available->next;
+	} else {
+		available = malloc(sizeof(*available));
 	}
-	return NULL;
+
+	available->prev = NULL;
+	available->next = s->active_connections;
+	s->active_connections = available;
+	if (available->next != NULL) {
+		available->next->prev = available;
+	}
+	return available;
+}
+
+static void free_conn(struct server_state *s, struct conn *c) {
+	if (c->prev != NULL) {
+		c->prev->next = c->next;
+	} else {
+		s->active_connections = c->next;
+	}
+
+	if (c->next != NULL) {
+		c->next->prev = c->prev;
+	}
+
+	c->next = s->connection_pool;
+	s->connection_pool = c;
 }
 
 [[noreturn]] static void die_errno(const char *msg) {
@@ -454,18 +481,8 @@ static void handle_end(struct server_state *s, struct conn *conn) {
 	}
 	fprintf(stderr, "closed connected [%d]\n", conn->fd);
 
-	// Mark for re-use
 	conn->fd = -1;
-
-	// TODO: Only do this when required
-	struct epoll_event ev = {
-		.events = EPOLLIN,
-		.data.ptr = NULL,
-	};
-	res = epoll_ctl(s->epoll_fd, EPOLL_CTL_MOD, s->socket_fd, &ev);
-	if (res == -1) {
-		perror("failed to re-enable listening socket to epoll group");
-	}
+	free_conn(s, conn);
 }
 
 static void handle_data_available(struct server_state *s, struct conn *conn) {
@@ -502,21 +519,6 @@ static void handle_data_available(struct server_state *s, struct conn *conn) {
 }
 
 static void handle_new_connection(struct server_state *s) {
-	struct conn *new_conn = find_available_conn(s);
-	if (new_conn == NULL) {
-		fprintf(stderr, "too many active connections\n");
-		// Hold off on new connections until a spot is available
-		struct epoll_event ev = {
-			.events = 0,
-			.data.ptr = NULL,
-		};
-		int res = epoll_ctl(s->epoll_fd, EPOLL_CTL_MOD, s->socket_fd, &ev);
-		if (res == -1) {
-			perror("could not disable epoll for listening socket");
-		}
-		return;
-	}
-
 	struct sockaddr_in client_addr;
 	socklen_t client_addr_len = sizeof(client_addr);
 	int conn_fd = accept(
@@ -531,6 +533,9 @@ static void handle_new_connection(struct server_state *s) {
 		return;
 	}
 
+	struct conn *new_conn = get_available_conn(s);
+	conn_init(new_conn, conn_fd);
+
 	struct epoll_event ev = {
 		.events = EPOLLIN | EPOLLOUT | EPOLLET,
 		.data.ptr = new_conn,
@@ -538,10 +543,10 @@ static void handle_new_connection(struct server_state *s) {
 	int res = epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, conn_fd, &ev);
 	if (res == -1) {
 		perror("failed to add connection to epoll group");
+		handle_end(s, new_conn);
 		return;
 	}
 
-	conn_init(new_conn, conn_fd);
 	fprintf(stderr, "openned connection [%d]\n", conn_fd);
 	// Check immediately in case data is available
 	handle_data_available(s, new_conn);
@@ -557,8 +562,7 @@ int main(void) {
 
 	// Setup listening socket
 	struct epoll_event ev;
-	// Leave this event as level-triggered since some connections can't be accepted right away
-	ev.events = EPOLLIN;
+	ev.events = EPOLLIN | EPOLLET;
 	ev.data.ptr = NULL; // Tag to indicate the listening socket
 	int res = epoll_ctl(
 		epoll_fd, EPOLL_CTL_ADD, socket_fd, &ev

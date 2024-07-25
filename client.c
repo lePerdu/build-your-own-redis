@@ -8,7 +8,6 @@
 #include <unistd.h>
 
 #include "protocol.h"
-#include "value.h"
 
 [[noreturn]] static void die_errno(const char *msg) {
 	perror(msg);
