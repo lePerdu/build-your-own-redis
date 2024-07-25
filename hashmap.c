@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -6,7 +7,7 @@
 
 #define MAX_LOAD_FACTOR 8
 
-static void ht_init(struct hash_table *ht, size_t cap) {
+static void ht_init(struct hash_table *ht, uint32_t cap) {
 	assert(cap > 0);
 	assert((cap & (cap - 1)) == 0);
 	ht->mask = cap - 1;
@@ -16,7 +17,7 @@ static void ht_init(struct hash_table *ht, size_t cap) {
 }
 
 static void ht_insert(struct hash_table *ht, struct hash_entry *entry) {
-	size_t index = entry->hash_code & ht->mask;
+	uint32_t index = entry->hash_code & ht->mask;
 	struct hash_entry *next = ht->data[index];
 	entry->next = next;
 	ht->data[index] = entry;
@@ -28,7 +29,7 @@ static struct hash_entry **ht_lookup(
 	const struct hash_entry *key,
 	hash_entry_cmp_fn compare
 ) {
-	size_t index = key->hash_code & ht->mask;
+	uint32_t index = key->hash_code & ht->mask;
 	struct hash_entry **from = &ht->data[index];
 	while (*from != NULL) {
 		if ((*from)->hash_code == key->hash_code && compare(key, *from)) {
@@ -50,7 +51,7 @@ static struct hash_entry *ht_detach(
 }
 
 static void ht_move_entries(struct hash_table *to, struct hash_table *from) {
-	for (size_t index = 0; index <= from->mask; index++) {
+	for (uint32_t index = 0; index <= from->mask; index++) {
 		struct hash_entry *entry = from->data[index];
 		while (entry != NULL) {
 			struct hash_entry *next = entry->next;
@@ -64,7 +65,7 @@ static void ht_move_entries(struct hash_table *to, struct hash_table *from) {
 	assert(from->size == 0);
 }
 
-void hash_map_init(struct hash_map *m, size_t cap) {
+void hash_map_init(struct hash_map *m, uint32_t cap) {
 	ht_init(&m->ht, cap);
 }
 
@@ -84,7 +85,7 @@ struct hash_entry *hash_map_get(
 void hash_map_insert(struct hash_map *m, struct hash_entry *entry) {
 	ht_insert(&m->ht, entry);
 
-	size_t capacity = m->ht.mask + 1;
+	uint32_t capacity = m->ht.mask + 1;
 	if (m->ht.size >= MAX_LOAD_FACTOR * capacity) {
 		struct hash_table new_table;
 		ht_init(&new_table, capacity * 2);
