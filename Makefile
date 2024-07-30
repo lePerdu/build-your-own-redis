@@ -3,31 +3,26 @@ CFLAGS = -std=c17 -Wall -Wextra -Og -g
 BUILD = build
 BIN = bin
 
-COMMON_SRCS = hashmap.c protocol.c
+COMMON_SRCS = hashmap.c object.c protocol.c
 COMMON_OBJS = $(COMMON_SRCS:%.c=$(BUILD)/%.o)
 
 SERVER_SRCS = server.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(BUILD)/%.o)
 SERVER_EXEC = $(BIN)/server
 
-CLIENT_SRCS = client.c
-CLIENT_OBJS = $(CLIENT_SRCS:%.c=$(BUILD)/%.o)
-CLIENT_EXEC = $(BIN)/client
-
 TEST_SRCS = test.c
 TEST_OBJS = $(TEST_SRCS:%.c=$(BUILD)/%.o)
 TEST_EXEC = $(BIN)/test
 
-all: $(SERVER_EXEC) $(CLIENT_EXEC)
+all: $(SERVER_EXEC)
 
 $(BUILD)/%.o: %.c | $(BUILD)
 	$(CC) $(CFLAGS) -MMD -c -o $@ $<
 
 $(SERVER_EXEC): $(SERVER_OBJS)
-$(CLIENT_EXEC): $(CLIENT_OBJS)
 $(TEST_EXEC): $(TEST_OBJS)
 
-$(SERVER_EXEC) $(CLIENT_EXEC) $(TEST_EXEC): $(COMMON_OBJS) | $(BIN)
+$(SERVER_EXEC) $(TEST_EXEC): $(COMMON_OBJS) | $(BIN)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BUILD) $(BIN):
@@ -40,7 +35,7 @@ debug_server: $(SERVER_EXEC)
 	gdb $<
 
 run_client: $(CLIENT_EXEC)
-	$<
+	env PYTHONSTARTUP=client.py python3
 
 test: $(TEST_EXEC)
 	$<
