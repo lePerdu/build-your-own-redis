@@ -2,7 +2,11 @@
 #define HASHMAP_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+
+#define container_of(ptr, type, member) \
+	((type *)((void *)(ptr) - offsetof(type, member)))
 
 typedef uint32_t hash_t;
 
@@ -22,7 +26,9 @@ struct hash_map {
 	struct hash_table ht;
 };
 
-typedef bool (*hash_entry_cmp_fn)(const void *, const void *);
+typedef bool (*hash_entry_cmp_fn)(
+	const struct hash_entry *, const struct hash_entry *
+);
 
 void hash_map_init(struct hash_map *m, uint32_t cap);
 

@@ -9,10 +9,10 @@ struct test_node {
 	int val;
 };
 
-static bool test_node_cmp(const void *a, const void *b) {
+static bool test_node_cmp(const struct hash_entry *a, const struct hash_entry *b) {
 	return (
-		((const struct test_node *) a)->key ==
-		((const struct test_node *) b)->key
+		container_of(a, struct test_node, entry)->key ==
+		container_of(b, struct test_node, entry)->key
 	);
 }
 
