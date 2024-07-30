@@ -6,143 +6,90 @@
 #include "protocol.h"
 #include "test.h"
 
+#define make_array_const_slice(arr) make_const_slice(arr, sizeof(arr))
+#define make_array_slice(arr) make_slice(arr, sizeof(arr))
+
 #define assert_slice_eq(a, b) do { \
 		assert((a).size == (b).size); \
 		assert(memcmp((a).data, (b).data, (a).size) == 0); \
 	} while (false)
 
-static void test_write_parse_get_req(void) {
-	uint8_t buffer[PROTO_MAX_MESSAGE_SIZE];
-	struct request req_out = {
-		.type = REQ_GET,
-		.key = {
-			.size = 3,
-			.data = "abc",
-		},
+static void test_parse_get_req(void) {
+	uint8_t buffer[] = {
+		9, 0, 0, 0,
+		REQ_GET,
+		OBJ_STR,
+		3, 0, 0, 0,
+		'a', 'b', 'c',
 	};
-	ssize_t write_size = write_request(
-		make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &req_out
-	);
-	assert(write_size > 0);
-	assert(write_size == 4 + 1 + 4 + 3);
 
-	struct request req_in;
-	ssize_t parse_size =
-		parse_request(&req_in, make_const_slice(buffer, write_size));
+	struct request req;
+	ssize_t parse_size = parse_request(&req, make_array_const_slice(buffer));
 	assert(parse_size > 0);
-	assert(parse_size == write_size);
+	assert(parse_size == sizeof(buffer));
 
-	assert(req_out.type == req_out.type);
-	assert_slice_eq(req_in.key, req_out.key);
+	assert(req.type == REQ_GET);
+	assert(req.args[0].type == OBJ_STR);
+	assert_slice_eq(req.args[0].str_ref, make_str_slice("abc"));
 }
 
-static void test_write_parse_set_req(void) {
-	uint8_t buffer[PROTO_MAX_MESSAGE_SIZE];
-	struct request req_out = {
-		.type = REQ_SET,
-		.key = {
-			.size = 3,
-			.data = "abc",
-		},
-		.val = {
-			.size = 8,
-			.data = "12345678",
-		},
+static void test_parse_set_req(void) {
+	uint8_t buffer[] = {
+		18, 0, 0, 0,
+		REQ_SET,
+		OBJ_STR,
+		3, 0, 0, 0,
+		'a', 'b', 'c',
+		OBJ_INT,
+		0xf0, 0xde, 0xbc, 0x9a,
+		0x78, 0x56, 0x34, 0x12,
 	};
-	ssize_t write_size = write_request(make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &req_out);
-	assert(write_size > 0);
-	assert(write_size == 4 + 1 + 4 + 3 + 4 + 8);
 
-	struct request req_in;
-	ssize_t parse_size = parse_request(
-		&req_in, make_const_slice(buffer, write_size)
-	);
+	struct request req;
+	ssize_t parse_size = parse_request(&req, make_array_const_slice(buffer));
 	assert(parse_size > 0);
-	assert(parse_size == write_size);
+	assert(parse_size == sizeof(buffer));
 
-	assert(req_out.type == req_out.type);
-	assert_slice_eq(req_in.key, req_out.key);
+	assert(req.type == REQ_SET);
+	assert(req.args[0].type == OBJ_STR);
+	assert_slice_eq(req.args[0].str_ref, make_str_slice("abc"));
+	assert(req.args[1].type == OBJ_INT);
+	assert(req.args[1].int_val == 0x123456789abcdef0UL);
 }
 
-static void test_write_parse_del_req_max_size(void) {
-	uint8_t max_size_data[PROTO_MAX_PAYLOAD_SIZE];
-	memset(max_size_data, 'A', PROTO_MAX_PAYLOAD_SIZE);
+static void test_parse_del_req_max_size(void) {
+	uint8_t header[] = {
+		0, 0, 0, 0,
+		REQ_DEL,
+		OBJ_STR,
+		0, 0, 0, 0,
+	};
+	proto_size_t total_size = PROTO_MAX_PAYLOAD_SIZE;
+	memcpy(header, &total_size, PROTO_HEADER_SIZE);
+	proto_size_t str_size = total_size - (sizeof(header) - PROTO_HEADER_SIZE);
+	memcpy(&header[6], &str_size, PROTO_HEADER_SIZE);
 
 	uint8_t buffer[PROTO_MAX_MESSAGE_SIZE];
-	struct request req_out = {
-		.type = REQ_DEL,
-		.key = {
-			.size = PROTO_MAX_PAYLOAD_SIZE - 4 - 1,
-			.data = max_size_data,
-		},
-	};
-	ssize_t write_size = write_request(make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &req_out);
-	assert(write_size > 0);
-	assert(write_size == PROTO_MAX_MESSAGE_SIZE);
+	memset(buffer, 'A', PROTO_MAX_MESSAGE_SIZE);
+	memcpy(buffer, header, sizeof(header));
 
-	struct request req_in;
-	ssize_t parse_size = parse_request(
-		&req_in, make_const_slice(buffer, write_size)
-	);
+	struct request req;
+	ssize_t parse_size = parse_request(&req, make_array_const_slice(buffer));
 	assert(parse_size > 0);
-	assert(parse_size == write_size);
+	assert(parse_size == sizeof(buffer));
 
-	assert(req_out.type == req_out.type);
-	assert_slice_eq(req_in.key, req_out.key);
+	assert(req.type == REQ_DEL);
+	assert(req.args[0].type == OBJ_STR);
+	assert(req.args[0].str_ref.size == str_size);
 }
 
-static void test_write_parse_ok_res(void) {
-	uint8_t buffer[PROTO_MAX_MESSAGE_SIZE];
-	struct response res_out = {
-		.type = RES_OK,
-		.data = {
-			.size = 8,
-			.data = "12345678",
-		},
-	};
-	ssize_t write_size = write_response(
-		make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &res_out
-	);
-	assert(write_size > 0);
-	assert(write_size == 4 + 1 + 4 + 8);
+static void test_parse_ok_res_nil(void) {}
 
-	struct response res_in;
-	ssize_t parse_size = parse_response(
-		&res_in, make_const_slice(buffer, write_size)
-	);
-	assert(parse_size > 0);
-	assert(parse_size == write_size);
+static void test_parse_ok_res_with_str_val(void) {}
 
-	assert(res_out.type == res_out.type);
-	assert_slice_eq(res_in.data, res_out.data);
-}
+static void test_parse_ok_res_max_size(void) {}
 
-static void test_write_parse_err_res_max_size(void) {
-	uint8_t max_size_data[PROTO_MAX_PAYLOAD_SIZE];
-	memset(max_size_data, 'A', PROTO_MAX_PAYLOAD_SIZE);
-
-	uint8_t buffer[PROTO_MAX_MESSAGE_SIZE];
-	struct response res_out = {
-		.type = RES_OK,
-		.data = {
-			.size = PROTO_MAX_PAYLOAD_SIZE - 1 - 4,
-			.data = max_size_data,
-		},
-	};
-	ssize_t write_size = write_response(make_slice(buffer, PROTO_MAX_MESSAGE_SIZE), &res_out);
-	assert(write_size > 0);
-	assert(write_size == PROTO_MAX_MESSAGE_SIZE);
-
-	struct response res_in;
-	ssize_t parse_size = parse_response(
-		&res_in, make_const_slice(buffer, write_size)
-	);
-	assert(parse_size > 0);
-	assert(parse_size == write_size);
-
-	assert(res_out.type == res_out.type);
-	assert_slice_eq(res_in.data, res_out.data);
-}
+static void test_parse_err_res_with_str_val(void) {}
 
 static void test_parse_partial_req(void) {
 	uint8_t buffer[] = {
@@ -230,6 +177,23 @@ static void test_parse_invalid_req_content_too_short(void) {
 	assert(parse_size == PARSE_ERR);
 }
 
+static void test_parse_invalid_req_message_len_too_small(void) {
+	uint8_t buffer[] = {
+		// Should be 9
+		7, 0, 0, 0,
+		REQ_GET,
+		OBJ_STR,
+		3, 0, 0, 0,
+		'a', 'b', 'c',
+	};
+
+	struct request req_in;
+	ssize_t parse_size = parse_request(
+		&req_in, make_const_slice(buffer, sizeof(buffer))
+	);
+	assert(parse_size == PARSE_ERR);
+}
+
 static void test_parse_invalid_req_over_max_size(void) {
 	uint8_t buffer[0xFFFF] = {
 		0xFB, 0xFF, 0, 0,
@@ -288,11 +252,14 @@ static void test_parse_invalid_res_over_max_size(void) {
 }
 
 void test_parser(void) {
-	RUN_TEST(test_write_parse_get_req);
-	RUN_TEST(test_write_parse_del_req_max_size);
-	RUN_TEST(test_write_parse_set_req);
-	RUN_TEST(test_write_parse_ok_res);
-	RUN_TEST(test_write_parse_err_res_max_size);
+	RUN_TEST(test_parse_get_req);
+	RUN_TEST(test_parse_set_req);
+	RUN_TEST(test_parse_del_req_max_size);
+
+	RUN_TEST(test_parse_ok_res_nil);
+	RUN_TEST(test_parse_ok_res_with_str_val);
+	RUN_TEST(test_parse_ok_res_max_size);
+	RUN_TEST(test_parse_err_res_with_str_val);
 
 	RUN_TEST(test_parse_partial_req);
 	RUN_TEST(test_parse_partial_res);
@@ -300,6 +267,7 @@ void test_parser(void) {
 	RUN_TEST(test_parse_partial_res_no_header);
 
 	RUN_TEST(test_parse_invalid_req_invalid_type);
+	RUN_TEST(test_parse_invalid_req_message_len_too_small);
 	RUN_TEST(test_parse_invalid_req_content_too_short);
 	RUN_TEST(test_parse_invalid_req_over_max_size);
 	RUN_TEST(test_parse_invalid_res_invalid_type);

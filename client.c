@@ -57,7 +57,7 @@ static ssize_t read_one_response(
 	if (read_exact(fd, buf, PROTO_HEADER_SIZE) == -1) {
 		return -1;
 	}
-	message_len_t message_len;
+	proto_size_t message_len;
 	memcpy(&message_len, buf, PROTO_HEADER_SIZE);
 
 	if (message_len > PROTO_MAX_PAYLOAD_SIZE) {
@@ -71,7 +71,7 @@ static ssize_t read_one_response(
 	ssize_t res_size = parse_response(
 		res, make_const_slice(buf, PROTO_MAX_MESSAGE_SIZE)
 	);
-	if (res_size != PROTO_HEADER_SIZE + message_len) {
+	if (res_size != (ssize_t) (PROTO_HEADER_SIZE + message_len)) {
 		return -1;
 	}
 	return res_size;
@@ -122,7 +122,7 @@ int main(int argc, char *argv[argc]) {
 	ssize_t n_write;
 
 	req.type = REQ_GET;
-	req.key = make_str_slice(key);
+	req.args[0] = make_str_object(key);
 	n_write = write_one_request(fd, write_buf, &req);
 	if (n_write == -1) {
 		die_errno("failed to write message");

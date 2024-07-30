@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <stdbool.h>
@@ -10,7 +11,6 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <errno.h>
 
 #include "protocol.h"
 #include "hashmap.h"
@@ -41,9 +41,10 @@ struct conn {
 struct store_entry {
 	struct hash_entry entry;
 
-	// Owned, malloc'd slices
+	// Owned
 	struct slice key;
-	struct slice val;
+	// Owned
+	struct object val;
 };
 
 // Same memory layout, but with different const modifiers
@@ -290,21 +291,28 @@ static hash_t slice_hash(struct const_slice s) {
     return h;
 }
 
-static bool store_ent_compare(const void *raw_a, const void *raw_b) {
-	const struct store_entry *a = raw_a;
-	const struct store_entry *b = raw_b;
+static bool store_ent_compare(
+	const struct hash_entry *raw_a, const struct hash_entry *raw_b
+) {
+  const struct store_entry *a = container_of(raw_a, struct store_entry, entry);
+  const struct store_entry *b = container_of(raw_b, struct store_entry, entry);
 
-	return (
-		a->key.size == b->key.size
-		&& memcmp(a->key.data, b->key.data, a->key.size) == 0
-	);
+  return (a->key.size == b->key.size &&
+          memcmp(a->key.data, b->key.data, a->key.size) == 0);
 }
 
 static void do_get(
 	struct hash_map *store,
-	struct const_slice key,
+	const struct object args[1],
 	struct response *res
 ) {
+	struct const_slice key;
+	if (!object_to_slice(&key, args[0])) {
+		res->type = RES_ERR;
+		res->arg = make_str_object("invalid key");
+		return;
+	}
+
 	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
@@ -315,12 +323,12 @@ static void do_get(
 	);
 	if (entry == NULL) {
 		res->type = RES_ERR;
-		res->data = make_str_slice("not found");
+		res->arg = make_str_object("not found");
 		return;
 	}
 
 	res->type = RES_OK;
-	res->data = to_const_slice(entry->val);
+	res->arg = object_to_ref(entry->val);
 }
 
 static struct slice slice_dup(struct const_slice s) {
@@ -330,29 +338,37 @@ static struct slice slice_dup(struct const_slice s) {
 }
 
 static struct store_entry *store_entry_alloc(
-	struct const_slice key, struct const_slice val
+	struct const_slice key, struct object val
 ) {
 	struct store_entry *new = malloc(sizeof(*new));
 	assert(new != NULL);
 	new->entry.hash_code = slice_hash(key);
 	new->key = slice_dup(key);
-	new->val = slice_dup(val);
+	new->val = object_to_owned(val);
 	return new;
 }
 
 static void store_entry_free(struct store_entry *ent) {
 	free(ent->key.data);
-	free(ent->val.data);
+	object_destroy(ent->val);
 	free(ent);
 }
 
 static void do_set(
 	struct hash_map *store,
-	struct const_slice key,
-	struct const_slice val,
+	const struct object args[2],
 	struct response *res
 ) {
-	// TODO: Re-structure hashmap API to avoid double lookup when inserting?
+	struct const_slice key;
+	if (!object_to_slice(&key, args[0])) {
+		res->type = RES_ERR;
+		res->arg = make_str_object("invalid key");
+		return;
+	}
+
+	struct object val = args[1];
+
+	// TODO: Re-structure hashmap API to avoid double hashing when inserting?
 	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
@@ -365,19 +381,26 @@ static void do_set(
 		struct store_entry *new_ent = store_entry_alloc(key, val);
 		hash_map_insert(store, (void *)new_ent);
 	} else {
-		free(existing->val.data);
-		existing->val = slice_dup(val);
+		object_destroy(existing->val);
+		existing->val = val;
 	}
 
 	res->type = RES_OK;
-	res->data = make_str_slice("");
+	res->arg = make_nil_object();
 }
 
 static void do_del(
 	struct hash_map *store,
-	struct const_slice key,
+	const struct object args[1],
 	struct response *res
 ) {
+	struct const_slice key;
+	if (!object_to_slice(&key, args[0])) {
+		res->type = RES_ERR;
+		res->arg = make_str_object("invalid key");
+		return;
+	}
+
 	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
@@ -388,13 +411,13 @@ static void do_del(
 	);
 	if (entry == NULL) {
 		res->type = RES_ERR;
-		res->data = make_str_slice("not found");
+		res->arg = make_str_object("not found");
 		return;
 	}
 	store_entry_free(entry);
 
 	res->type = RES_OK;
-	res->data = make_str_slice("");
+	res->arg = make_nil_object();
 }
 
 static int do_request(
@@ -407,13 +430,13 @@ static int do_request(
 	struct response res;
 	switch (req->type) {
         case REQ_GET:
-			do_get(store, req->key, &res);
+			do_get(store, req->args, &res);
 			break;
         case REQ_SET:
-			do_set(store, req->key, req->val, &res);
+			do_set(store, req->args, &res);
 			break;
         case REQ_DEL:
-			do_del(store, req->key, &res);
+			do_del(store, req->args, &res);
 			break;
 		default:
 			assert(false);

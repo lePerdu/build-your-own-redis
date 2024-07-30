@@ -2,19 +2,29 @@
 #define PROTOCOL_H_
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 
-#define PROTO_HEADER_SIZE 4
+typedef uint32_t proto_size_t;
+
+#define PROTO_SIZE_SIZE (sizeof(proto_size_t))
+#define PROTO_HEADER_SIZE PROTO_SIZE_SIZE
 #define PROTO_MAX_PAYLOAD_SIZE 4096
 #define PROTO_MAX_MESSAGE_SIZE (PROTO_HEADER_SIZE + PROTO_MAX_PAYLOAD_SIZE)
 
-typedef uint32_t message_len_t;
-static_assert(
-	sizeof(message_len_t) == PROTO_HEADER_SIZE, "incorrect message length type"
-);
+enum obj_type {
+	OBJ_NIL,
+	OBJ_INT,
+	OBJ_STR,
+	OBJ_ARR,
+};
+
+typedef int64_t int_val_t;
+
+// TODO: Use 32-bit sizes?
 
 struct slice {
 	size_t size;
@@ -26,41 +36,22 @@ struct const_slice {
 	const void *data;
 };
 
-enum req_type {
-	REQ_GET = 0,
-	REQ_SET = 1,
-	REQ_DEL = 2,
+struct array {
+	size_t size;
+	struct object *data;
 };
 
-struct request {
-	enum req_type type;
-	struct const_slice key;
+struct object {
+	enum obj_type type;
+	// TODO: Store in type field
+	bool owned;
+	union {
+		int_val_t int_val;
 
-	/**
-	 * Only used for SET
-	 */
-	struct const_slice val;
-};
-
-enum parse_result {
-	PARSE_OK = 0,
-	PARSE_ERR = -1,
-	PARSE_MORE = -2,
-};
-
-enum res_type {
-	RES_OK = 0,
-	RES_ERR = 1,
-};
-
-struct response {
-	enum res_type type;
-	struct const_slice data;
-};
-
-enum write_result {
-	WRITE_OK = 0,
-	WRITE_ERR = -1,
+		struct slice str_val; 
+		struct const_slice str_ref;
+		struct array arr_val;
+	};
 };
 
 static inline struct slice make_slice(void *data, size_t size) {
@@ -78,6 +69,104 @@ static inline struct const_slice make_str_slice(const char *str) {
 static inline struct const_slice to_const_slice(struct slice s) {
 	return make_const_slice(s.data, s.size);
 }
+
+static inline void slice_set(struct slice s, size_t index, uint8_t b) {
+	((uint8_t *) s.data)[index] = b;
+}
+
+static inline uint8_t const_slice_get(struct const_slice s, size_t index) {
+	return ((const uint8_t *) s.data)[index];
+}
+
+static inline struct object make_str_object(const char *s) {
+	return (struct object) {
+		.type = OBJ_STR,
+		.owned = false,
+		.str_ref = make_str_slice(s),
+	};
+}
+
+static inline struct object make_slice_object(struct const_slice s) {
+	return (struct object) { .type = OBJ_STR, .owned = false, .str_ref = s };
+}
+
+static inline struct object make_owned_slice_object(struct slice s) {
+	return (struct object) { .type = OBJ_STR, .owned = true, .str_val = s };
+}
+
+static inline struct object make_nil_object(void) {
+	return (struct object) {.type = OBJ_NIL, .owned = false};
+}
+
+bool object_to_slice(struct const_slice *s, struct object o);
+
+struct object object_to_ref(struct object o);
+struct object object_to_owned(struct object o);
+
+/**
+ * Destroys the object and all sub-objects.
+ */
+void object_destroy(struct object o);
+
+ssize_t parse_int_value(int_val_t *n, struct const_slice buffer);
+ssize_t write_int_value(struct slice buffer, int_val_t n);
+
+ssize_t parse_str_value(struct slice *str, struct const_slice buffer);
+/**
+ * Like `parse_str_value`, but doesn't copy the string data: `str->data`
+ * points to data inside `buffer`.
+ */
+ssize_t parse_str_ref_value(struct const_slice *str, struct const_slice buffer);
+ssize_t write_str_value(struct slice buffer, struct const_slice str);
+
+ssize_t parse_array_value(struct array *arr, struct const_slice buffer);
+ssize_t write_array_value(struct slice buffer, struct array arr);
+
+// Helpers when manually serializing an array
+ssize_t parse_array_size(size_t *n, struct const_slice buffer);
+ssize_t write_array_size(struct slice buffer, size_t n);
+
+ssize_t parse_object(struct object *v, struct const_slice buffer);
+ssize_t write_object(struct slice buffer, struct object v);
+
+enum req_type {
+	// Invalid request type, used for marking invalid/unknown data
+	REQ_UNKNOWN = -1,
+	REQ_GET = 0,
+	REQ_SET = 1,
+	REQ_DEL = 2,
+	REQ_MAX_ID,
+};
+
+static_assert(REQ_MAX_ID <= UINT8_MAX, "Too many requests to fit in 1 byte");
+
+#define REQ_ARGS_MAX 2
+
+struct request {
+	enum req_type type;
+	struct object args[REQ_ARGS_MAX];
+};
+
+enum parse_result {
+	PARSE_OK = 0,
+	PARSE_ERR = -1,
+	PARSE_MORE = -2,
+};
+
+enum res_type {
+	RES_OK = 0,
+	RES_ERR = 1,
+};
+
+struct response {
+	enum res_type type;
+	struct object arg;
+};
+
+enum write_result {
+	WRITE_OK = 0,
+	WRITE_ERR = -1,
+};
 
 ssize_t write_request(
 	struct slice buffer,

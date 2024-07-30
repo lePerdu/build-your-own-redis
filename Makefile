@@ -45,12 +45,12 @@ run_client: $(CLIENT_EXEC)
 test: $(TEST_EXEC)
 	$<
 
-debug_tests: $(TEST_EXEC)
+debug_test: $(TEST_EXEC)
 	gdb $<
 
 clean:
 	$(RM) -r $(BUILD) $(BIN)
 
-.PHONY: run_server debug_server run_client run_tests debug_tests clean
+.PHONY: run_server debug_server run_client test debug_test clean
 
 -include $(BUILD)/*.d
