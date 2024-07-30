@@ -105,12 +105,17 @@ struct hash_entry *hash_map_delete(
 	return ht_detach(&m->ht, location);
 }
 
-void hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg) {
+bool hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg) {
 	for (uint32_t index = 0; index <= m->ht.mask; index++) {
 		struct hash_entry *entry = m->ht.data[index];
 		while (entry != NULL) {
-			cb(entry, arg);
+			if (!cb(entry, arg)) {
+				return false;
+			}
+
 			entry = entry->next;
 		}
 	}
+
+	return true;
 }

@@ -32,6 +32,10 @@ typedef bool (*hash_entry_cmp_fn)(
 
 void hash_map_init(struct hash_map *m, uint32_t cap);
 
+static inline uint32_t hash_map_size(const struct hash_map *m) {
+	return m->ht.size;
+}
+
 struct hash_entry *hash_map_get(
 	const struct hash_map *m,
 	const struct hash_entry *key,
@@ -42,7 +46,7 @@ struct hash_entry *hash_map_delete(
 	struct hash_map *m, const struct hash_entry *key, hash_entry_cmp_fn compare
 );
 
-typedef void (*hash_entry_iter_fn)(struct hash_entry *entry, void *arg);
-void hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg);
+typedef bool (*hash_entry_iter_fn)(struct hash_entry *entry, void *arg);
+bool hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg);
 
 #endif

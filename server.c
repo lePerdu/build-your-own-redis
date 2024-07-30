@@ -10,10 +10,13 @@
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 
-#include "protocol.h"
 #include "hashmap.h"
+#include "object.h"
+#include "protocol.h"
+#include "types.h"
 
 #define MAX_EVENTS 256
 
@@ -301,18 +304,33 @@ static bool store_ent_compare(
           memcmp(a->key.data, b->key.data, a->key.size) == 0);
 }
 
-static void do_get(
+static ssize_t write_object_response(struct slice buffer, struct object o) {
+	const void *init = buffer.data;
+	ssize_t res = write_response_header(buffer, RES_OK);
+	if (res < 0) {
+		return WRITE_ERR;
+	}
+	slice_advance(&buffer, res);
+
+	res = write_object(buffer, o);
+	if (res < 0) {
+		return WRITE_ERR;
+	}
+	slice_advance(&buffer, res);
+
+	return buffer.data - init;
+}
+
+static ssize_t do_get(
 	struct hash_map *store,
-	const struct object args[1],
-	struct response *res
+	const struct req_object args[1],
+	struct slice out_buf
 ) {
-	struct const_slice key;
-	if (!object_to_slice(&key, args[0])) {
-		res->type = RES_ERR;
-		res->arg = make_str_object("invalid key");
-		return;
+	if (args[0].type != SER_STR) {
+		return write_err_response(out_buf, "invalid key");
 	}
 
+	struct const_slice key = args[0].str_val;
 	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
@@ -322,19 +340,10 @@ static void do_get(
 		store, (void*)&store_key, store_ent_compare
 	);
 	if (entry == NULL) {
-		res->type = RES_ERR;
-		res->arg = make_str_object("not found");
-		return;
+		return write_err_response(out_buf, "not found");
 	}
 
-	res->type = RES_OK;
-	res->arg = object_to_ref(entry->val);
-}
-
-static struct slice slice_dup(struct const_slice s) {
-	void *copy = malloc(s.size);
-	memcpy(copy, s.data, s.size);
-	return make_slice(copy, s.size);
+	return write_object_response(out_buf, entry->val);
 }
 
 static struct store_entry *store_entry_alloc(
@@ -344,7 +353,7 @@ static struct store_entry *store_entry_alloc(
 	assert(new != NULL);
 	new->entry.hash_code = slice_hash(key);
 	new->key = slice_dup(key);
-	new->val = object_to_owned(val);
+	new->val = val;
 	return new;
 }
 
@@ -354,19 +363,28 @@ static void store_entry_free(struct store_entry *ent) {
 	free(ent);
 }
 
-static void do_set(
+static struct object make_object_from_req(struct req_object req_o) {
+	switch (req_o.type) {
+        case SER_INT:
+			return make_int_object(req_o.int_val);
+        case SER_STR:
+			return make_slice_object(slice_dup(req_o.str_val));
+		default:
+			assert(false);
+	}
+}
+
+static ssize_t do_set(
 	struct hash_map *store,
-	const struct object args[2],
-	struct response *res
+	const struct req_object args[2],
+	struct slice out_buf
 ) {
-	struct const_slice key;
-	if (!object_to_slice(&key, args[0])) {
-		res->type = RES_ERR;
-		res->arg = make_str_object("invalid key");
-		return;
+	if (args[0].type != SER_STR) {
+		return write_err_response(out_buf, "invalid key");
 	}
 
-	struct object val = args[1];
+	struct const_slice key = args[0].str_val;
+	struct object val = make_object_from_req(args[1]);
 
 	// TODO: Re-structure hashmap API to avoid double hashing when inserting?
 	struct store_key store_key = {
@@ -385,22 +403,19 @@ static void do_set(
 		existing->val = val;
 	}
 
-	res->type = RES_OK;
-	res->arg = make_nil_object();
+	return write_nil_response(out_buf);
 }
 
-static void do_del(
+static size_t do_del(
 	struct hash_map *store,
-	const struct object args[1],
-	struct response *res
+	const struct req_object args[1],
+	struct slice out_buf
 ) {
-	struct const_slice key;
-	if (!object_to_slice(&key, args[0])) {
-		res->type = RES_ERR;
-		res->arg = make_str_object("invalid key");
-		return;
+	if (args[0].type != SER_STR) {
+		return write_err_response(out_buf, "invalid key");
 	}
 
+	struct const_slice key = args[0].str_val;
 	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
@@ -410,42 +425,48 @@ static void do_del(
 		store, (void*)&store_key, store_ent_compare
 	);
 	if (entry == NULL) {
-		res->type = RES_ERR;
-		res->arg = make_str_object("not found");
-		return;
+		return write_err_response(out_buf, "not found");
 	}
 	store_entry_free(entry);
 
-	res->type = RES_OK;
-	res->arg = make_nil_object();
+	return write_nil_response(out_buf);
 }
 
-struct appender_context {
-	size_t added;
-	struct object *arr;
+struct keys_context {
+	struct slice out_buf;
+	ssize_t res;
 };
 
-static void append_key_to_response(struct hash_entry *raw_entry, void *arg) {
-	struct appender_context *ctx = arg;
+static bool append_key_to_response(struct hash_entry *raw_entry, void *arg) {
+	struct keys_context *ctx = arg;
 	struct store_entry *entry =
 		container_of(raw_entry, struct store_entry, entry);
 
-	assert(ctx->added < ctx->arr->arr_val.size);
-
-	ctx->arr->arr_val.data[ctx->added] =
-		make_slice_object(to_const_slice(entry->key));
-	ctx->added++;
+	ssize_t elem_res = write_str_value(ctx->out_buf, to_const_slice(entry->key));
+	if (elem_res < 0) {
+		ctx->res = elem_res;
+		return false;
+	} else {
+		ctx->res += elem_res;
+		slice_advance(&ctx->out_buf, elem_res);
+		return true;
+	}
 }
 
-static void do_keys(
+static ssize_t do_keys(
 	struct hash_map *store,
-	struct response *res
+	struct slice out_buf
 ) {
-	res->type = RES_OK;
-	res->arg = make_arr_object(store->ht.size);
-	struct appender_context ctx = {.added = 0, .arr = &res->arg};
+	ssize_t header_size =
+		write_arr_response_header(out_buf, hash_map_size(store));
+	if (header_size < 0) {
+		return -1;
+	}
+	slice_advance(&out_buf, header_size);
 
+	struct keys_context ctx = {.res = header_size, .out_buf = out_buf};
 	hash_map_iter(store, append_key_to_response, &ctx);
+	return ctx.res;
 }
 
 static int do_request(
@@ -455,38 +476,40 @@ static int do_request(
 	print_request(stderr, req);
 	putc('\n', stderr);
 
-	struct response res;
+	struct slice msg_size_buf = write_buf_tail_slice(&conn->write_buf);
+	msg_size_buf.size = PROTO_HEADER_SIZE;
+	write_buf_inc_size(&conn->write_buf, PROTO_HEADER_SIZE);
+	struct slice out_buf = write_buf_tail_slice(&conn->write_buf);
+
+	ssize_t res;
 	switch (req->type) {
         case REQ_GET:
-			do_get(store, req->args, &res);
+			res = do_get(store, req->args, out_buf);
 			break;
         case REQ_SET:
-			do_set(store, req->args, &res);
+			res = do_set(store, req->args, out_buf);
 			break;
         case REQ_DEL:
-			do_del(store, req->args, &res);
+			res = do_del(store, req->args, out_buf);
 			break;
 		case REQ_KEYS:
-			do_keys(store, &res);
+			res = do_keys(store, out_buf);
 			break;
 		default:
 			assert(false);
 	}
 
-	fprintf(stderr, "to client [%d]: ", conn->fd);
-	print_response(stderr, &res);
-	putc('\n', stderr);
-
-	ssize_t res_size = write_response(write_buf_tail_slice(&conn->write_buf), &res);
-	if (res_size < 0) {
+	if (res < 0) {
 		fprintf(stderr, "failed to write response to buffer");
 		return -1;
 	}
-	write_buf_inc_size(&conn->write_buf, res_size);
-	// Cleanup in case it allocated
-	// TODO: Remove this and avoid allocations in response processing?
-	object_destroy(res.arg);
 
+	if (write_message_size(msg_size_buf, res) < 0) {
+		fprintf(stderr, "failed to write response header to buffer");
+		return -1;
+	}
+
+	write_buf_inc_size(&conn->write_buf, res);
 	return 0;
 }
 

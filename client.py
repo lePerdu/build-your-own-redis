@@ -90,10 +90,11 @@ class Client:
         self.conn.sendall(full_msg)
 
         packet_len_buf = self.conn.recv(4, socket.MSG_WAITALL)
-        assert len(packet_len_buf) == 4
+        assert len(packet_len_buf) == 4, "failed to read message header"
         resp_len = int.from_bytes(packet_len_buf, 'little')
         resp_data = self.conn.recv(resp_len, socket.MSG_WAITALL)
-        assert len(resp_data) == resp_len
+        assert len(resp_data) == resp_len, "failed to read message content"
+        print('recevied', packet_len_buf + resp_data)
 
         obj, rest = parse_object(resp_data[1:])
         assert len(rest) == 0
