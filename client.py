@@ -20,9 +20,15 @@ class ObjType(enum.IntEnum):
     ARR = 3
 
 
+class ProtocolError(Exception):
+    pass
+class ParseError(ProtocolError):
+    pass
+class UnexpectedEofError(ProtocolError):
+    pass
+
+
 def extend_with_arg(buffer, arg):
-    if arg is None:
-        buffer.append(ObjType.NIL)
     if isinstance(arg, int):
         buffer.append(ObjType.INT)
         buffer.extend(arg.to_bytes(8, 'little'))
@@ -36,13 +42,8 @@ def extend_with_arg(buffer, arg):
         buffer.append(ObjType.STR)
         buffer.extend(len(arg).to_bytes(4, 'little'))
         buffer.extend(arg)
-    elif isinstance(arg, list):
-        buffer.append(ObjType.ARR)
-        buffer.extend(len(arg).to_bytes(4, 'little'))
-        for a in arg:
-            extend_with_arg(buffer, a)
     else:
-        raise "invalid object type"
+        raise TypeError(f'Invalid request argument type: {type(arg)}')
 
 
 def parse_object(buffer):
@@ -51,16 +52,21 @@ def parse_object(buffer):
     if type_byte == ObjType.NIL:
         return None, buffer
     elif type_byte == ObjType.INT:
-        assert len(buffer) >= 8
+        if len(buffer) < 8:
+            raise ParseError('not enough data')
         return int.from_bytes(buffer[:8], 'little'), buffer[8:]
     elif type_byte == ObjType.STR:
-        assert len(buffer) >= 4
+        if len(buffer) < 4:
+            raise ParseError('not enough data')
         str_len = int.from_bytes(buffer[:4], 'little')
         buffer = buffer[4:]
-        assert len(buffer) >= str_len
+        if len(buffer) < str_len:
+            raise ParseError('not enough data')
         return buffer[:str_len], buffer[str_len:]
     elif type_byte == ObjType.ARR:
-        assert len(buffer) >= 4
+        if len(buffer) < 4:
+            raise ParseError('not enough data')
+
         arr_len = int.from_bytes(buffer[:4], 'little')
         buffer = buffer[4:]
         arr = []
@@ -69,7 +75,7 @@ def parse_object(buffer):
             arr.append(elem)
         return arr, buffer
     else:
-        raise "invalid object type"
+        raise ParseError(f'Invalid response type: f{type_byte}')
 
 
 class Client:
@@ -90,14 +96,21 @@ class Client:
         self.conn.sendall(full_msg)
 
         packet_len_buf = self.conn.recv(4, socket.MSG_WAITALL)
-        assert len(packet_len_buf) == 4, "failed to read message header"
+        if len(packet_len_buf) == 0:
+            raise UnexpectedEofError
+        elif len(packet_len_buf) != 4:
+            raise UnexpectedEofError('Received partial message header')
+
         resp_len = int.from_bytes(packet_len_buf, 'little')
         resp_data = self.conn.recv(resp_len, socket.MSG_WAITALL)
-        assert len(resp_data) == resp_len, "failed to read message content"
+        if len(resp_data) != resp_len:
+            raise UnexpectedEofError('Received partial message data')
         print('recevied', packet_len_buf + resp_data)
 
         obj, rest = parse_object(resp_data[1:])
-        assert len(rest) == 0
+        if len(rest) > 0:
+            raise ProtocolError('Message contains extra data')
+
         return Response(resp_data[0]), obj
 
     def close(self):
