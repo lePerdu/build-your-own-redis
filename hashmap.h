@@ -42,4 +42,7 @@ struct hash_entry *hash_map_delete(
 	struct hash_map *m, const struct hash_entry *key, hash_entry_cmp_fn compare
 );
 
+typedef void (*hash_entry_iter_fn)(struct hash_entry *entry, void *arg);
+void hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg);
+
 #endif

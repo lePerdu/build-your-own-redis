@@ -420,6 +420,34 @@ static void do_del(
 	res->arg = make_nil_object();
 }
 
+struct appender_context {
+	size_t added;
+	struct object *arr;
+};
+
+static void append_key_to_response(struct hash_entry *raw_entry, void *arg) {
+	struct appender_context *ctx = arg;
+	struct store_entry *entry =
+		container_of(raw_entry, struct store_entry, entry);
+
+	assert(ctx->added < ctx->arr->arr_val.size);
+
+	ctx->arr->arr_val.data[ctx->added] =
+		make_slice_object(to_const_slice(entry->key));
+	ctx->added++;
+}
+
+static void do_keys(
+	struct hash_map *store,
+	struct response *res
+) {
+	res->type = RES_OK;
+	res->arg = make_arr_object(store->ht.size);
+	struct appender_context ctx = {.added = 0, .arr = &res->arg};
+
+	hash_map_iter(store, append_key_to_response, &ctx);
+}
+
 static int do_request(
 	struct conn *conn, struct hash_map *store, const struct request *req
 ) {
@@ -438,6 +466,9 @@ static int do_request(
         case REQ_DEL:
 			do_del(store, req->args, &res);
 			break;
+		case REQ_KEYS:
+			do_keys(store, &res);
+			break;
 		default:
 			assert(false);
 	}
@@ -452,6 +483,9 @@ static int do_request(
 		return -1;
 	}
 	write_buf_inc_size(&conn->write_buf, res_size);
+	// Cleanup in case it allocated
+	// TODO: Remove this and avoid allocations in response processing?
+	object_destroy(res.arg);
 
 	return 0;
 }

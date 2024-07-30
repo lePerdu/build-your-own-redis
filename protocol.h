@@ -2,6 +2,7 @@
 #define PROTOCOL_H_
 
 #include <assert.h>
+#include <bits/types/struct_iovec.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -98,6 +99,8 @@ static inline struct object make_nil_object(void) {
 	return (struct object) {.type = OBJ_NIL, .owned = false};
 }
 
+struct object make_arr_object(size_t size);
+
 bool object_to_slice(struct const_slice *s, struct object o);
 
 struct object object_to_ref(struct object o);
@@ -135,6 +138,7 @@ enum req_type {
 	REQ_GET = 0,
 	REQ_SET = 1,
 	REQ_DEL = 2,
+	REQ_KEYS = 3,
 	REQ_MAX_ID,
 };
 

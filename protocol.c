@@ -52,6 +52,18 @@ bool object_to_slice(struct const_slice *s, struct object o) {
 	return true;
 }
 
+struct object make_arr_object(size_t size) {
+	struct object *data = malloc(sizeof(data[0]) * size);
+	return (struct object) {
+		.type = OBJ_ARR,
+		.owned = true,
+		.arr_val = {
+			.size = size,
+			.data = data,
+		},
+	};
+}
+
 void object_destroy(struct object o) {
 	if (!o.owned) {
 		return;
@@ -282,6 +294,7 @@ static int request_arg_count(enum req_type t) {
 		case REQ_GET: return 1;
 		case REQ_SET: return 2;
 		case REQ_DEL: return 1;
+		case REQ_KEYS: return 0;
 		default: return -1;
 	}
 }
@@ -479,6 +492,7 @@ static const char *request_name(enum req_type t) {
         case REQ_GET: return "GET";
         case REQ_SET: return "SET";
         case REQ_DEL: return "DEL";
+		case REQ_KEYS: return "KEYS";
 		default: return "UNKNOWN";
 	}
 }

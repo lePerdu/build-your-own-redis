@@ -5,6 +5,7 @@ class Request(enum.IntEnum):
     GET = 0
     SET = 1
     DEL = 2
+    KEYS = 3
 
 
 class Response(enum.IntEnum):
@@ -62,18 +63,17 @@ def parse_object(buffer):
         assert len(buffer) >= 4
         arr_len = int.from_bytes(buffer[:4], 'little')
         buffer = buffer[4:]
-        assert len(buffer) == arr_len
         arr = []
         for _ in range(arr_len):
             elem, buffer = parse_object(buffer)
             arr.append(elem)
-        return arr
+        return arr, buffer
     else:
         raise "invalid object type"
 
 
 class Client:
-    def __init__(self, host, port=1234):
+    def __init__(self, host='localhost', port=1234):
         self.conn = socket.create_connection((host, port))
 
     def send(self, request, *args):
