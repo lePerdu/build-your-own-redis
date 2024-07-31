@@ -10,54 +10,70 @@
 
 #define INT_VAL_SIZE (sizeof(int_val_t))
 
-static ssize_t parse_size(proto_size_t *ret, struct const_slice buffer) {
-	if (buffer.size < PROTO_SIZE_SIZE) {
-		return -1;
-	}
-
-	memcpy(ret, buffer.data, PROTO_SIZE_SIZE);
-	return PROTO_SIZE_SIZE;
-}
-
 ssize_t parse_int_value(int_val_t *n, struct const_slice buffer) {
 	if (buffer.size < INT_VAL_SIZE) {
-		return -1;
+		return PARSE_MORE;
 	}
 	memcpy(n, buffer.data, INT_VAL_SIZE);
 	return INT_VAL_SIZE;
 }
 
 ssize_t parse_str_value(struct const_slice *str, struct const_slice buffer) {
-	proto_size_t len;
-	ssize_t n = parse_size(&len, buffer);
-	if (n < 0) {
-		return -1;
+	if (buffer.size < PROTO_SIZE_SIZE) {
+		return PARSE_MORE;
 	}
-	const_slice_advance(&buffer, n);
 
-	if (len > buffer.size) {
-		return -1;
+	proto_size_t len;
+	memcpy(&len, buffer.data, PROTO_SIZE_SIZE);
+	const_slice_advance(&buffer, PROTO_SIZE_SIZE);
+
+	if (buffer.size < len) {
+		return PARSE_MORE;
 	}
 
 	*str = make_const_slice(buffer.data, len);
-	return n + str->size;
+	return PROTO_SIZE_SIZE + str->size;
 }
 
-// Helpers when manually serializing an array
-ssize_t parse_array_size(size_t *arr_size, struct const_slice buffer) {
-	proto_size_t len;
-	ssize_t n = parse_size(&len, buffer);
-	if (n < 0) {
-		return -1;
+int request_arg_count(enum req_type t) {
+	switch (t) {
+		case REQ_GET: return 1;
+		case REQ_SET: return 2;
+		case REQ_DEL: return 1;
+		case REQ_KEYS: return 0;
+		default: return -1;
 	}
-	const_slice_advance(&buffer, n);
-	*arr_size = len;
-	return n;
+}
+
+void req_object_destroy(struct req_object *o) {
+	switch (o->type) {
+		case SER_STR:
+			free(o->str_val.data);
+			break;
+		default:
+			break;
+	}
+}
+
+ssize_t parse_req_type(enum req_type *t, struct const_slice buffer) {
+	if (buffer.size < 1) {
+		return PARSE_MORE;
+	}
+
+	*t = const_slice_get(buffer, 0);
+	const_slice_advance(&buffer, 1);
+
+	// Use this to check if the type is valid
+	int arg_count = request_arg_count(*t);
+	if (arg_count < 0) {
+		return PARSE_ERR;
+	}
+	return 1;
 }
 
 ssize_t parse_req_object(struct req_object *o, struct const_slice buffer) {
 	if (buffer.size < 1) {
-		return -1;
+		return PARSE_MORE;
 	}
 
 	o->type = const_slice_get(buffer, 0);
@@ -68,69 +84,22 @@ ssize_t parse_req_object(struct req_object *o, struct const_slice buffer) {
 		case SER_INT:
 			val_size = parse_int_value(&o->int_val, buffer);
 			break;
-		case SER_STR:
-			val_size = parse_str_value(&o->str_val, buffer);
+		case SER_STR: {
+			struct const_slice s;
+			val_size = parse_str_value(&s, buffer);
+			if (val_size > 0) {
+				o->str_val = slice_dup(s);
+			}
 			break;
+		}
 		default:
-			return -1;
+			return PARSE_ERR;
 	}
 	if (val_size < 0) {
-		return -1;
+		return val_size;
 	}
 
 	return 1 + val_size;
-}
-
-static int request_arg_count(enum req_type t) {
-	switch (t) {
-		case REQ_GET: return 1;
-		case REQ_SET: return 2;
-		case REQ_DEL: return 1;
-		case REQ_KEYS: return 0;
-		default: return -1;
-	}
-}
-
-ssize_t parse_request(struct request *req, struct const_slice buffer) {
-	const void *init_buf_start = buffer.data;
-
-	if (buffer.size < PROTO_HEADER_SIZE) {
-		return PARSE_MORE;
-	}
-
-	proto_size_t message_len;
-	memcpy(&message_len, buffer.data, PROTO_HEADER_SIZE);
-	const_slice_advance(&buffer, PROTO_HEADER_SIZE);
-
-	if (message_len > buffer.size) {
-		return PARSE_MORE;
-	}
-
-	// Limit slice to just the packet to simplify later checks
-	buffer.size = message_len;
-
-	req->type = const_slice_get(buffer, 0);
-	const_slice_advance(&buffer, 1);
-
-	int arg_count = request_arg_count(req->type);
-	if (arg_count < 0) {
-		return WRITE_ERR;
-	}
-
-	for (int i = 0; i < arg_count; i++) {
-		ssize_t n = parse_req_object(&req->args[i], buffer);
-		if (n < 0) {
-			return WRITE_ERR;
-		}
-		const_slice_advance(&buffer, n);
-	}
-
-	if (buffer.size > 0) {
-		// Shouldn't be extra data
-		return PARSE_ERR;
-	}
-
-	return buffer.data - init_buf_start;
 }
 
 static void write_size(struct buffer *b, proto_size_t size) {
@@ -196,6 +165,8 @@ static int print_object(FILE *stream, const struct req_object *o);
 
 static int print_object(FILE *stream, const struct req_object *o) {
 	switch (o->type) {
+		case SER_NIL:
+			return fprintf(stream, "<NIL>");
         case SER_INT:
 			return fprintf(stream, "%ld", o->int_val);
         case SER_STR:

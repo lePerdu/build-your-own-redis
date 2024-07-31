@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "buffer.h"
 #include "hashmap.h"
 #include "object.h"
 #include "protocol.h"
@@ -35,6 +36,12 @@ enum conn_state {
 	CONN_CLOSE,
 };
 
+struct req_parser {
+	struct request req;
+	int arg_count;
+	int parsed_args;
+};
+
 struct conn {
 	// Linked list pointers for managing connection pool
 	struct conn *prev;
@@ -44,7 +51,10 @@ struct conn {
 	enum conn_state state;
 
 	struct offset_buf read_buf;
+	struct req_parser req_parser;
+
 	struct offset_buf write_buf;
+
 };
 
 struct store_entry {
@@ -74,10 +84,19 @@ struct server_state {
 	struct conn *active_connections;
 };
 
+static void req_parser_init(struct req_parser *p) {
+	p->req.type = REQ_UNKNOWN;
+	p->arg_count = 0;
+	p->parsed_args = 0;
+}
+
 static void conn_init(struct conn *c, int fd) {
 	c->fd = fd;
 	c->state = CONN_READ_REQ;
+
 	offset_buf_init(&c->read_buf, READ_BUF_INIT_CAP);
+	req_parser_init(&c->req_parser);
+
 	offset_buf_init(&c->write_buf, WRITE_BUF_INIT_CAP);
 }
 
@@ -335,7 +354,7 @@ static void do_get(
 		return;
 	}
 
-	struct const_slice key = args[0].str_val;
+	struct const_slice key = to_const_slice(args[0].str_val);
 	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
@@ -369,12 +388,16 @@ static void store_entry_free(struct store_entry *ent) {
 	free(ent);
 }
 
-static struct object make_object_from_req(struct req_object req_o) {
-	switch (req_o.type) {
+static struct object make_object_from_req(struct req_object *req_o) {
+	switch (req_o->type) {
         case SER_INT:
-			return make_int_object(req_o.int_val);
-        case SER_STR:
-			return make_slice_object(slice_dup(req_o.str_val));
+			return make_int_object(req_o->int_val);
+        case SER_STR: {
+			struct object new = make_slice_object(req_o->str_val);
+			// Mark as NIL since the value has been moved out
+			req_o->type = SER_NIL;
+			return new;
+		}
 		default:
 			assert(false);
 	}
@@ -382,7 +405,7 @@ static struct object make_object_from_req(struct req_object req_o) {
 
 static void do_set(
 	struct hash_map *store,
-	const struct req_object args[2],
+	struct req_object args[2],
 	struct buffer *out_buf
 ) {
 	if (args[0].type != SER_STR) {
@@ -390,8 +413,8 @@ static void do_set(
 		return;
 	}
 
-	struct const_slice key = args[0].str_val;
-	struct object val = make_object_from_req(args[1]);
+	struct const_slice key = to_const_slice(args[0].str_val);
+	struct object val = make_object_from_req(&args[1]);
 
 	// TODO: Re-structure hashmap API to avoid double hashing when inserting?
 	struct store_key store_key = {
@@ -423,7 +446,7 @@ static void do_del(
 		return;
 	}
 
-	struct const_slice key = args[0].str_val;
+	struct const_slice key = to_const_slice(args[0].str_val);
 	struct store_key store_key = {
 		.entry.hash_code = slice_hash(key),
 		.key = key,
@@ -460,7 +483,7 @@ static void do_keys(
 }
 
 static void do_request(
-	struct conn *conn, struct hash_map *store, const struct request *req
+	struct conn *conn, struct hash_map *store, struct request *req
 ) {
 	fprintf(stderr, "from client [%d]: ", conn->fd);
 	print_request(stderr, req);
@@ -485,24 +508,66 @@ static void do_request(
 	}
 }
 
+static enum parse_result run_req_parser(struct conn *conn) {
+	struct req_parser *parser = &conn->req_parser;
+
+	ssize_t res;
+	if (parser->req.type == REQ_UNKNOWN) {
+		res = parse_req_type(
+			&parser->req.type, offset_buf_head_slice(&conn->read_buf)
+		);
+		if (res < 0) {
+			return res;
+		}
+		offset_buf_advance(&conn->read_buf, res);
+
+		parser->arg_count = request_arg_count(parser->req.type);
+		assert(parser->arg_count >= 0);
+		parser->parsed_args = 0;
+	}
+
+	while (parser->parsed_args < parser->arg_count) {
+		res = parse_req_object(
+			&parser->req.args[parser->parsed_args],
+			offset_buf_head_slice(&conn->read_buf)
+		);
+		if (res < 0) {
+			return res;
+		}
+		offset_buf_advance(&conn->read_buf, res);
+		parser->parsed_args++;
+	}
+
+	return PARSE_OK;
+}
+
+static void reset_req_parser(struct req_parser *p) {
+	p->req.type = REQ_UNKNOWN;
+	for (int i = 0; i < p->parsed_args; i++) {
+		req_object_destroy(&p->req.args[i]);
+	}
+	p->arg_count = 0;
+	p->parsed_args = 0;
+}
+
 static void handle_process_req(struct conn *conn, struct hash_map *store) {
-	struct request req;
-	ssize_t msg_size =
-		parse_request(&req, offset_buf_head_slice(&conn->read_buf));
-	switch (msg_size) {
+	ssize_t parsed_size = run_req_parser(conn);
+	switch (parsed_size) {
 		case PARSE_ERR:
 			fprintf(stderr, "invalid message\n");
+			reset_req_parser(&conn->req_parser);
 			conn->state = CONN_CLOSE;
 			return;
 		case PARSE_MORE:
-			conn->state= CONN_READ_REQ;
+			conn->state = CONN_READ_REQ;
 			return;
 	}
 
-	assert(msg_size >= 0);
-	offset_buf_advance(&conn->read_buf, msg_size);
+	assert(parsed_size >= 0);
+	offset_buf_advance(&conn->read_buf, parsed_size);
 
-	do_request(conn, store, &req);
+	do_request(conn, store, &conn->req_parser.req);
+	reset_req_parser(&conn->req_parser);
 	conn->state = CONN_WRITE_RES;
 }
 

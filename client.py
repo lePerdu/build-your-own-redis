@@ -104,12 +104,8 @@ class Client:
         for a in args:
             extend_with_arg(buffer, a)
 
-        full_msg = bytearray()
-        full_msg.extend(len(buffer).to_bytes(4, 'little'))
-        full_msg.extend(buffer)
-
-        print('sending', full_msg)
-        self.conn.sendall(full_msg)
+        print('sending', buffer)
+        self.conn.sendall(buffer)
 
     def _recv(self):
         # TODO: Reduce the amount of copies

@@ -24,7 +24,6 @@ enum proto_type {
 
 // Helpers for deserializing
 
-ssize_t parse_obj_type(enum proto_type *t, struct const_slice buffer);
 ssize_t parse_int_value(int_val_t *n, struct const_slice buffer);
 /**
  * Parses a string ref from the buffer (does not copy/allocate).
@@ -62,14 +61,15 @@ static_assert(REQ_MAX_ID <= UINT8_MAX, "Too many requests to fit in 1 byte");
 
 /**
  * Subset of `struct object` specialized for requests which only stores
- * non-allocated values.
+ * NIL, STR and INT.
  */
 struct req_object {
-	/** Only OBJ_STR or OBJ_INT */
 	enum proto_type type;
 	union {
 		int_val_t int_val;
-		struct const_slice str_val;
+		/** Owned string value */
+		struct slice str_val;
+		// TODO: Support string refs when data is still around
 	};
 };
 
@@ -96,7 +96,11 @@ enum write_result {
 	WRITE_ERR = -1,
 };
 
-ssize_t parse_request(struct request *req, struct const_slice buffer);
+int request_arg_count(enum req_type t);
+void req_object_destroy(struct req_object *o);
+
+ssize_t parse_req_type(enum req_type *t, struct const_slice buffer);
+ssize_t parse_req_object(struct req_object *o, struct const_slice buffer);
 void print_request(FILE *stream, const struct request *req);
 
 void write_response_header(struct buffer *b, enum res_type res_type);
