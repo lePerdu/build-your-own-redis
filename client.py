@@ -96,6 +96,7 @@ class Client:
         self.conn.sendall(full_msg)
 
         packet_len_buf = self.conn.recv(4, socket.MSG_WAITALL)
+        print('recevied len', packet_len_buf)
         if len(packet_len_buf) == 0:
             raise UnexpectedEofError
         elif len(packet_len_buf) != 4:
@@ -103,9 +104,9 @@ class Client:
 
         resp_len = int.from_bytes(packet_len_buf, 'little')
         resp_data = self.conn.recv(resp_len, socket.MSG_WAITALL)
+        print('recevied', resp_data)
         if len(resp_data) != resp_len:
             raise UnexpectedEofError('Received partial message data')
-        print('recevied', packet_len_buf + resp_data)
 
         obj, rest = parse_object(resp_data[1:])
         if len(rest) > 0:
