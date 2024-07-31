@@ -82,7 +82,7 @@ class Client:
     def __init__(self, host='localhost', port=1234):
         self.conn = socket.create_connection((host, port))
 
-    def send(self, request, *args):
+    def _send(self, request, *args):
         buffer = bytearray()
         buffer.append(request)
         for a in args:
@@ -95,6 +95,7 @@ class Client:
         print('sending', full_msg)
         self.conn.sendall(full_msg)
 
+    def _recv(self):
         packet_len_buf = self.conn.recv(4, socket.MSG_WAITALL)
         print('recevied len', packet_len_buf)
         if len(packet_len_buf) == 0:
@@ -113,6 +114,10 @@ class Client:
             raise ProtocolError('Message contains extra data')
 
         return Response(resp_data[0]), obj
+
+    def send(self, request, *args):
+        self._send(request, *args)
+        return self._recv()
 
     def close(self):
         self.conn.close()
