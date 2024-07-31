@@ -27,6 +27,9 @@ class ParseError(ProtocolError):
 class UnexpectedEofError(ProtocolError):
     pass
 
+class NotEnoughData(Exception):
+    pass
+
 
 def extend_with_arg(buffer, arg):
     if isinstance(arg, int):
@@ -46,41 +49,54 @@ def extend_with_arg(buffer, arg):
         raise TypeError(f'Invalid request argument type: {type(arg)}')
 
 
-def parse_object(buffer):
+def try_parse_object(buffer):
+    if len(buffer) == 0:
+        raise NotEnoughData
+
     type_byte = buffer[0]
     buffer = buffer[1:]
     if type_byte == ObjType.NIL:
         return None, buffer
     elif type_byte == ObjType.INT:
         if len(buffer) < 8:
-            raise ParseError('not enough data')
+            raise NotEnoughData
         return int.from_bytes(buffer[:8], 'little'), buffer[8:]
     elif type_byte == ObjType.STR:
         if len(buffer) < 4:
-            raise ParseError('not enough data')
+            raise NotEnoughData
         str_len = int.from_bytes(buffer[:4], 'little')
         buffer = buffer[4:]
         if len(buffer) < str_len:
-            raise ParseError('not enough data')
-        return buffer[:str_len], buffer[str_len:]
+            raise NotEnoughData
+        return bytes(buffer[:str_len]), buffer[str_len:]
     elif type_byte == ObjType.ARR:
         if len(buffer) < 4:
-            raise ParseError('not enough data')
+            raise NotEnoughData
 
         arr_len = int.from_bytes(buffer[:4], 'little')
         buffer = buffer[4:]
         arr = []
         for _ in range(arr_len):
-            elem, buffer = parse_object(buffer)
+            elem, buffer = try_parse_object(buffer)
             arr.append(elem)
         return arr, buffer
     else:
         raise ParseError(f'Invalid response type: f{type_byte}')
 
 
+def try_parse_response(buffer):
+    if len(buffer) == 0:
+        raise NotEnoughData
+    resp_code = Response(buffer[0])
+    obj, rest = try_parse_object(buffer[1:])
+    return (resp_code, obj), rest
+
+
 class Client:
     def __init__(self, host='localhost', port=1234):
         self.conn = socket.create_connection((host, port))
+        self.recv_buf = bytearray(4096)
+        self.recv_len = 0
 
     def _send(self, request, *args):
         buffer = bytearray()
@@ -96,24 +112,28 @@ class Client:
         self.conn.sendall(full_msg)
 
     def _recv(self):
-        packet_len_buf = self.conn.recv(4, socket.MSG_WAITALL)
-        print('recevied len', packet_len_buf)
-        if len(packet_len_buf) == 0:
-            raise UnexpectedEofError
-        elif len(packet_len_buf) != 4:
-            raise UnexpectedEofError('Received partial message header')
+        # TODO: Reduce the amount of copies
+        while True:
+            try:
+                resp, rest = try_parse_response(
+                    memoryview(self.recv_buf)[:self.recv_len]
+                )
+                # Reset the buffers after a good parse
+                self.recv_buf = bytearray(rest)
+                self.recv_len = len(self.recv_buf)
+                return resp
+            except NotEnoughData:
+                pass
 
-        resp_len = int.from_bytes(packet_len_buf, 'little')
-        resp_data = self.conn.recv(resp_len, socket.MSG_WAITALL)
-        print('recevied', resp_data)
-        if len(resp_data) != resp_len:
-            raise UnexpectedEofError('Received partial message data')
+            if len(self.recv_buf) - self.recv_len < 1024:
+                extra_cap = max(len(self.recv_buf), 1024)
+                self.recv_buf.extend(bytes(extra_cap))
 
-        obj, rest = parse_object(resp_data[1:])
-        if len(rest) > 0:
-            raise ProtocolError('Message contains extra data')
-
-        return Response(resp_data[0]), obj
+            chunk_len = self.conn.recv_into(memoryview(self.recv_buf)[self.recv_len:])
+            print('received', self.recv_buf[self.recv_len:self.recv_len+chunk_len])
+            if chunk_len == 0:
+                raise UnexpectedEofError
+            self.recv_len += chunk_len
 
     def send(self, request, *args):
         self._send(request, *args)

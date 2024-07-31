@@ -139,10 +139,6 @@ static void write_size(struct buffer *b, proto_size_t size) {
 	b->size += PROTO_SIZE_SIZE;
 }
 
-void write_message_size_at(void *buf, proto_size_t size) {
-	memcpy(buf, &size, PROTO_SIZE_SIZE);
-}
-
 void write_obj_type(struct buffer *b, enum proto_type t) {
 	buffer_append_byte(b, t);
 }

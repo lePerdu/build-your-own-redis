@@ -99,8 +99,6 @@ enum write_result {
 ssize_t parse_request(struct request *req, struct const_slice buffer);
 void print_request(FILE *stream, const struct request *req);
 
-/** Write the size at an arbitrary location (for writing it at the start). */
-void write_message_size_at(void *buf, proto_size_t size);
 void write_response_header(struct buffer *b, enum res_type res_type);
 
 // Helpers for common response types

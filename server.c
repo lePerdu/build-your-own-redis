@@ -81,7 +81,9 @@ static void conn_init(struct conn *c, int fd) {
 	offset_buf_init(&c->write_buf, WRITE_BUF_INIT_CAP);
 }
 
-static void server_state_init(struct server_state *s, int socket_fd, int epoll_fd) {
+static void server_state_init(
+	struct server_state *s, int socket_fd, int epoll_fd
+) {
 	s->socket_fd = socket_fd;
 	s->epoll_fd = epoll_fd;
 	hash_map_init(&s->store, 16);
@@ -179,7 +181,10 @@ static int setup_socket(void) {
 	res = getsockname(fd, (struct sockaddr *) &bound_addr, &bound_addr_size);
 	if (res == 0 && bound_addr.sin_family == AF_INET) {
 		char addr_name[INET_ADDRSTRLEN];
-		if (inet_ntop(AF_INET, &bound_addr.sin_addr, addr_name, sizeof(addr_name)) == NULL) {
+		const char *addr_res = inet_ntop(
+			AF_INET, &bound_addr.sin_addr, addr_name, sizeof(addr_name)
+		);
+		if (addr_res == NULL) {
 			perror("failed to get bound address name");
 		}
 
@@ -461,11 +466,7 @@ static void do_request(
 	print_request(stderr, req);
 	putc('\n', stderr);
 
-	uint32_t start_buf_size = conn->write_buf.buf.size;
-	offset_buf_inc_size(&conn->write_buf, PROTO_HEADER_SIZE);
-	uint32_t msg_start_size = conn->write_buf.buf.size;
 	struct buffer *out_buf = &conn->write_buf.buf;
-
 	switch (req->type) {
         case REQ_GET:
 			do_get(store, req->args, out_buf);
@@ -482,14 +483,12 @@ static void do_request(
 		default:
 			assert(false);
 	}
-
-	proto_size_t msg_size = conn->write_buf.buf.size - msg_start_size;
-	write_message_size_at(conn->write_buf.buf.data + start_buf_size, msg_size);
 }
 
 static void handle_process_req(struct conn *conn, struct hash_map *store) {
 	struct request req;
-	ssize_t msg_size = parse_request(&req, offset_buf_head_slice(&conn->read_buf));
+	ssize_t msg_size =
+		parse_request(&req, offset_buf_head_slice(&conn->read_buf));
 	switch (msg_size) {
 		case PARSE_ERR:
 			fprintf(stderr, "invalid message\n");
