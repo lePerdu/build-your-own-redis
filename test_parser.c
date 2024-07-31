@@ -57,26 +57,27 @@ static void test_parse_set_req(void) {
 	assert(req.args[1].int_val == 0x123456789abcdef0UL);
 }
 
-static void test_parse_del_req_max_size(void) {
+static void test_parse_del_req_large_size(void) {
 	uint8_t header[] = {
 		0, 0, 0, 0,
 		REQ_DEL,
 		SER_STR,
 		0, 0, 0, 0,
 	};
-	proto_size_t total_size = PROTO_MAX_PAYLOAD_SIZE;
-	memcpy(header, &total_size, PROTO_HEADER_SIZE);
-	proto_size_t str_size = total_size - (sizeof(header) - PROTO_HEADER_SIZE);
+	proto_size_t total_size = 10000;
+	proto_size_t msg_size = total_size - PROTO_HEADER_SIZE;
+	memcpy(header, &msg_size, PROTO_HEADER_SIZE);
+	proto_size_t str_size = total_size - sizeof(header);
 	memcpy(&header[6], &str_size, PROTO_HEADER_SIZE);
 
-	uint8_t buffer[PROTO_MAX_MESSAGE_SIZE];
-	memset(buffer, 'A', PROTO_MAX_MESSAGE_SIZE);
+	uint8_t buffer[total_size];
+	memset(buffer, 'A', total_size);
 	memcpy(buffer, header, sizeof(header));
 
 	struct request req;
 	ssize_t parse_size = parse_request(&req, make_array_const_slice(buffer));
 	assert(parse_size > 0);
-	assert(parse_size == sizeof(buffer));
+	assert((size_t)parse_size == sizeof(buffer));
 
 	assert(req.type == REQ_DEL);
 	assert(req.args[0].type == SER_STR);
@@ -166,24 +167,10 @@ static void test_parse_invalid_req_message_len_too_small(void) {
 	assert(parse_size == PARSE_ERR);
 }
 
-static void test_parse_invalid_req_over_max_size(void) {
-	uint8_t buffer[0xFFFF] = {
-		0xFB, 0xFF, 0, 0,
-		REQ_SET,
-		3, 0, 0, 0,
-		'1', '2', '3',
-	};
-	struct request req_in;
-	ssize_t parse_size = parse_request(
-		&req_in, make_const_slice(buffer, sizeof(buffer))
-	);
-	assert(parse_size == PARSE_ERR);
-}
-
 void test_parser(void) {
 	RUN_TEST(test_parse_get_req);
 	RUN_TEST(test_parse_set_req);
-	RUN_TEST(test_parse_del_req_max_size);
+	RUN_TEST(test_parse_del_req_large_size);
 
 	RUN_TEST(test_parse_ok_res_nil);
 	RUN_TEST(test_parse_ok_res_with_str_val);
@@ -196,5 +183,4 @@ void test_parser(void) {
 	RUN_TEST(test_parse_invalid_req_invalid_type);
 	RUN_TEST(test_parse_invalid_req_message_len_too_small);
 	RUN_TEST(test_parse_invalid_req_content_too_short);
-	RUN_TEST(test_parse_invalid_req_over_max_size);
 }

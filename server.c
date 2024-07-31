@@ -43,8 +43,8 @@ struct conn {
 	int fd;
 	enum conn_state state;
 
-	struct read_buf read_buf;
-	struct write_buf write_buf;
+	struct offset_buf read_buf;
+	struct offset_buf write_buf;
 };
 
 struct store_entry {
@@ -77,8 +77,8 @@ struct server_state {
 static void conn_init(struct conn *c, int fd) {
 	c->fd = fd;
 	c->state = CONN_READ_REQ;
-	read_buf_init(&c->read_buf, READ_BUF_INIT_CAP);
-	write_buf_init(&c->write_buf, WRITE_BUF_INIT_CAP);
+	offset_buf_init(&c->read_buf, READ_BUF_INIT_CAP);
+	offset_buf_init(&c->write_buf, WRITE_BUF_INIT_CAP);
 }
 
 static void server_state_init(struct server_state *s, int socket_fd, int epoll_fd) {
@@ -205,24 +205,24 @@ enum read_result {
  * The full buffer capacity is requested from `fd`, although this may read less
  * than the full capacity.
  */
-static enum read_result read_buf_fill(int fd, struct read_buf *r) {
+static enum read_result read_buf_fill(int fd, struct offset_buf *r) {
 	// Make room for full message.
 	// TODO: Better heuristic for when to move data back
-	read_buf_reset_start(r);
+	offset_buf_reset_start(r);
 
 	// TODO: Better heuristic for when/how much to grow buffer
-	uint32_t cap = read_buf_cap(r);
+	uint32_t cap = offset_buf_cap(r);
 	if (cap < READ_BUF_MIN_CAP) {
-		read_buf_grow(r, READ_BUF_MIN_CAP);
+		offset_buf_grow(r, READ_BUF_MIN_CAP);
 	}
-	cap = read_buf_cap(r);
+	cap = offset_buf_cap(r);
 	// TODO: This could happen if the client sends a too-big message
 	assert(cap >= READ_BUF_MIN_CAP);
 
 	ssize_t n_read;
 	// Repeat for EINTR
 	do {
-		n_read = recv(fd, read_buf_tail(r), cap, 0);
+		n_read = recv(fd, offset_buf_tail(r), cap, 0);
 	} while (n_read == -1 && errno == EINTR);
 
 	if (n_read == -1) {
@@ -235,7 +235,7 @@ static enum read_result read_buf_fill(int fd, struct read_buf *r) {
 		return READ_EOF;
 	} else {
 		assert(n_read > 0);
-		read_buf_inc_size(r, n_read);
+		offset_buf_inc_size(r, n_read);
 		return READ_OK;
 	}
 }
@@ -246,13 +246,13 @@ enum send_result {
 	SEND_MORE = -2,
 };
 
-static enum send_result write_buf_flush(int fd, struct write_buf *w) {
-	size_t remaining = write_buf_remaining(w);
+static enum send_result write_buf_flush(int fd, struct offset_buf *wb) {
+	size_t remaining = offset_buf_remaining(wb);
 	assert(remaining > 0);
 
 	ssize_t n_write;
 	do {
-		n_write = send(fd, write_buf_head(w), remaining, MSG_NOSIGNAL);
+		n_write = send(fd, offset_buf_head(wb), remaining, MSG_NOSIGNAL);
 	} while (n_write == -1 && errno == EINTR);
 
 	if (n_write == -1) {
@@ -264,10 +264,10 @@ static enum send_result write_buf_flush(int fd, struct write_buf *w) {
 	}
 
 	assert(n_write > 0);
-	write_buf_advance(w, n_write);
-	remaining = write_buf_remaining(w);
+	offset_buf_advance(wb, n_write);
+	remaining = offset_buf_remaining(wb);
 	if (remaining == 0) {
-		write_buf_reset(w);
+		offset_buf_reset(wb);
 		return SEND_OK;
 	} else {
 		return SEND_MORE;
@@ -462,7 +462,7 @@ static void do_request(
 	putc('\n', stderr);
 
 	uint32_t start_buf_size = conn->write_buf.buf.size;
-	write_buf_inc_size(&conn->write_buf, PROTO_HEADER_SIZE);
+	offset_buf_inc_size(&conn->write_buf, PROTO_HEADER_SIZE);
 	uint32_t msg_start_size = conn->write_buf.buf.size;
 	struct buffer *out_buf = &conn->write_buf.buf;
 
@@ -489,7 +489,7 @@ static void do_request(
 
 static void handle_process_req(struct conn *conn, struct hash_map *store) {
 	struct request req;
-	ssize_t msg_size = parse_request(&req, read_buf_head_slice(&conn->read_buf));
+	ssize_t msg_size = parse_request(&req, offset_buf_head_slice(&conn->read_buf));
 	switch (msg_size) {
 		case PARSE_ERR:
 			fprintf(stderr, "invalid message\n");
@@ -501,7 +501,7 @@ static void handle_process_req(struct conn *conn, struct hash_map *store) {
 	}
 
 	assert(msg_size >= 0);
-	read_buf_advance(&conn->read_buf, msg_size);
+	offset_buf_advance(&conn->read_buf, msg_size);
 
 	do_request(conn, store, &req);
 	conn->state = CONN_WRITE_RES;
