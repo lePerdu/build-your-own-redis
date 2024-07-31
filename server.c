@@ -241,7 +241,7 @@ static enum send_result write_buf_flush(int fd, struct write_buf *w) {
 
 	ssize_t n_write;
 	do {
-		n_write = send(fd, write_buf_write_pos(w), remaining, MSG_NOSIGNAL);
+		n_write = send(fd, write_buf_head(w), remaining, MSG_NOSIGNAL);
 	} while (n_write == -1 && errno == EINTR);
 
 	if (n_write == -1) {
@@ -304,30 +304,19 @@ static bool store_ent_compare(
           memcmp(a->key.data, b->key.data, a->key.size) == 0);
 }
 
-static ssize_t write_object_response(struct slice buffer, struct object o) {
-	const void *init = buffer.data;
-	ssize_t res = write_response_header(buffer, RES_OK);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	res = write_object(buffer, o);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	return buffer.data - init;
+static void write_object_response(struct buffer *b, struct object o) {
+	write_response_header(b, RES_OK);
+	write_object(b, o);
 }
 
-static ssize_t do_get(
+static void do_get(
 	struct hash_map *store,
 	const struct req_object args[1],
-	struct slice out_buf
+	struct buffer *out_buf
 ) {
 	if (args[0].type != SER_STR) {
-		return write_err_response(out_buf, "invalid key");
+		write_err_response(out_buf, "invalid key");
+		return;
 	}
 
 	struct const_slice key = args[0].str_val;
@@ -340,10 +329,11 @@ static ssize_t do_get(
 		store, (void*)&store_key, store_ent_compare
 	);
 	if (entry == NULL) {
-		return write_err_response(out_buf, "not found");
+		write_err_response(out_buf, "not found");
+		return;
 	}
 
-	return write_object_response(out_buf, entry->val);
+	write_object_response(out_buf, entry->val);
 }
 
 static struct store_entry *store_entry_alloc(
@@ -374,13 +364,14 @@ static struct object make_object_from_req(struct req_object req_o) {
 	}
 }
 
-static ssize_t do_set(
+static void do_set(
 	struct hash_map *store,
 	const struct req_object args[2],
-	struct slice out_buf
+	struct buffer *out_buf
 ) {
 	if (args[0].type != SER_STR) {
-		return write_err_response(out_buf, "invalid key");
+		write_err_response(out_buf, "invalid key");
+		return;
 	}
 
 	struct const_slice key = args[0].str_val;
@@ -403,16 +394,17 @@ static ssize_t do_set(
 		existing->val = val;
 	}
 
-	return write_nil_response(out_buf);
+	write_nil_response(out_buf);
 }
 
-static size_t do_del(
+static void do_del(
 	struct hash_map *store,
 	const struct req_object args[1],
-	struct slice out_buf
+	struct buffer *out_buf
 ) {
 	if (args[0].type != SER_STR) {
-		return write_err_response(out_buf, "invalid key");
+		write_err_response(out_buf, "invalid key");
+		return;
 	}
 
 	struct const_slice key = args[0].str_val;
@@ -425,92 +417,63 @@ static size_t do_del(
 		store, (void*)&store_key, store_ent_compare
 	);
 	if (entry == NULL) {
-		return write_err_response(out_buf, "not found");
+		write_err_response(out_buf, "not found");
+		return;
 	}
 	store_entry_free(entry);
 
-	return write_nil_response(out_buf);
+	write_nil_response(out_buf);
 }
 
-struct keys_context {
-	struct slice out_buf;
-	ssize_t res;
-};
-
 static bool append_key_to_response(struct hash_entry *raw_entry, void *arg) {
-	struct keys_context *ctx = arg;
+	struct buffer *out_buf = arg;
 	struct store_entry *entry =
 		container_of(raw_entry, struct store_entry, entry);
 
-	ssize_t elem_res = write_str_value(ctx->out_buf, to_const_slice(entry->key));
-	if (elem_res < 0) {
-		ctx->res = elem_res;
-		return false;
-	} else {
-		ctx->res += elem_res;
-		slice_advance(&ctx->out_buf, elem_res);
-		return true;
-	}
+	write_str_value(out_buf, to_const_slice(entry->key));
+	return true;
 }
 
-static ssize_t do_keys(
+static void do_keys(
 	struct hash_map *store,
-	struct slice out_buf
+	struct buffer *out_buf
 ) {
-	ssize_t header_size =
-		write_arr_response_header(out_buf, hash_map_size(store));
-	if (header_size < 0) {
-		return -1;
-	}
-	slice_advance(&out_buf, header_size);
+	write_arr_response_header(out_buf, hash_map_size(store));
 
-	struct keys_context ctx = {.res = header_size, .out_buf = out_buf};
-	hash_map_iter(store, append_key_to_response, &ctx);
-	return ctx.res;
+	hash_map_iter(store, append_key_to_response, out_buf);
 }
 
-static int do_request(
+static void do_request(
 	struct conn *conn, struct hash_map *store, const struct request *req
 ) {
 	fprintf(stderr, "from client [%d]: ", conn->fd);
 	print_request(stderr, req);
 	putc('\n', stderr);
 
-	struct slice msg_size_buf = write_buf_tail_slice(&conn->write_buf);
-	msg_size_buf.size = PROTO_HEADER_SIZE;
+	uint32_t start_buf_size = conn->write_buf.buf.size;
 	write_buf_inc_size(&conn->write_buf, PROTO_HEADER_SIZE);
-	struct slice out_buf = write_buf_tail_slice(&conn->write_buf);
+	uint32_t msg_start_size = conn->write_buf.buf.size;
+	struct buffer *out_buf = &conn->write_buf.buf;
 
-	ssize_t res;
 	switch (req->type) {
         case REQ_GET:
-			res = do_get(store, req->args, out_buf);
+			do_get(store, req->args, out_buf);
 			break;
         case REQ_SET:
-			res = do_set(store, req->args, out_buf);
+			do_set(store, req->args, out_buf);
 			break;
         case REQ_DEL:
-			res = do_del(store, req->args, out_buf);
+			do_del(store, req->args, out_buf);
 			break;
 		case REQ_KEYS:
-			res = do_keys(store, out_buf);
+			do_keys(store, out_buf);
 			break;
 		default:
 			assert(false);
 	}
 
-	if (res < 0) {
-		fprintf(stderr, "failed to write response to buffer");
-		return -1;
-	}
-
-	if (write_message_size(msg_size_buf, res) < 0) {
-		fprintf(stderr, "failed to write response header to buffer");
-		return -1;
-	}
-
-	write_buf_inc_size(&conn->write_buf, res);
-	return 0;
+	proto_size_t msg_size = conn->write_buf.buf.size - msg_start_size;
+	write_message_size_at(conn->write_buf.buf.data + start_buf_size, msg_size);
 }
 
 static void handle_process_req(struct conn *conn, struct hash_map *store) {
@@ -529,10 +492,7 @@ static void handle_process_req(struct conn *conn, struct hash_map *store) {
 	assert(msg_size >= 0);
 	read_buf_advance(&conn->read_buf, msg_size);
 
-	int res = do_request(conn, store, &req);
-	if (res < 0) {
-		conn->state = CONN_CLOSE;
-	}
+	do_request(conn, store, &req);
 	conn->state = CONN_WRITE_RES;
 }
 

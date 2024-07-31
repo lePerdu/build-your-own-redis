@@ -6,6 +6,7 @@
 #include <sys/types.h>
 
 #include "types.h"
+#include "buffer.h"
 
 enum obj_type {
 	OBJ_INT,
@@ -34,6 +35,6 @@ static inline struct object make_int_object(int_val_t n) {
  */
 void object_destroy(struct object o);
 
-ssize_t write_object(struct slice buffer, struct object);
+void write_object(struct buffer *b, struct object);
 
 #endif

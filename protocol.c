@@ -5,6 +5,7 @@
 #include <sys/types.h>
 
 #include "protocol.h"
+#include "buffer.h"
 #include "types.h"
 
 #define INT_VAL_SIZE (sizeof(int_val_t))
@@ -18,35 +19,12 @@ static ssize_t parse_size(proto_size_t *ret, struct const_slice buffer) {
 	return PROTO_SIZE_SIZE;
 }
 
-static ssize_t write_size(struct slice buffer, proto_size_t size) {
-	if (buffer.size < PROTO_SIZE_SIZE) {
-		return -1;
-	}
-
-	memcpy(buffer.data, &size, PROTO_SIZE_SIZE);
-	return PROTO_SIZE_SIZE;
-}
-
 ssize_t parse_int_value(int_val_t *n, struct const_slice buffer) {
 	if (buffer.size < INT_VAL_SIZE) {
 		return -1;
 	}
 	memcpy(n, buffer.data, INT_VAL_SIZE);
 	return INT_VAL_SIZE;
-}
-
-ssize_t write_int_value(struct slice buffer, int_val_t n) {
-	ssize_t res = write_obj_type(buffer, SER_INT);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	if (buffer.size < INT_VAL_SIZE) {
-		return -1;
-	}
-	memcpy(buffer.data, &n, INT_VAL_SIZE);
-	return res + INT_VAL_SIZE;
 }
 
 ssize_t parse_str_value(struct const_slice *str, struct const_slice buffer) {
@@ -65,29 +43,6 @@ ssize_t parse_str_value(struct const_slice *str, struct const_slice buffer) {
 	return n + str->size;
 }
 
-ssize_t write_str_value(struct slice buffer, struct const_slice str) {
-	ssize_t res = write_obj_type(buffer, SER_STR);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	size_t total_size = res + PROTO_SIZE_SIZE + str.size;
-	if (buffer.size < total_size) {
-		return -1;
-	}
-
-	proto_size_t str_len = str.size;
-	ssize_t n = write_size(buffer, str_len);
-	// Already checked buffer size above
-	assert(n > 0);
-	slice_advance(&buffer, n);
-
-	memcpy(buffer.data, str.data, str.size);
-
-	return total_size;
-}
-
 // Helpers when manually serializing an array
 ssize_t parse_array_size(size_t *arr_size, struct const_slice buffer) {
 	proto_size_t len;
@@ -98,22 +53,6 @@ ssize_t parse_array_size(size_t *arr_size, struct const_slice buffer) {
 	const_slice_advance(&buffer, n);
 	*arr_size = len;
 	return n;
-}
-
-ssize_t write_array_header(struct slice buffer, size_t arr_size) {
-	const void *init = buffer.data;
-	ssize_t res = write_obj_type(buffer, SER_ARR);
-	if (res < 0) {
-		return -1;
-	}
-	slice_advance(&buffer, res);
-
-	res = write_size(buffer, arr_size);
-	if (res < 0) {
-		return -1;
-	}
-	slice_advance(&buffer, res);
-	return buffer.data - init;
 }
 
 ssize_t parse_req_object(struct req_object *o, struct const_slice buffer) {
@@ -150,113 +89,6 @@ static int request_arg_count(enum req_type t) {
 		case REQ_KEYS: return 0;
 		default: return -1;
 	}
-}
-
-ssize_t write_obj_type(struct slice buffer, enum proto_type t) {
-	if (buffer.size < 1) {
-		return WRITE_ERR;
-	}
-	slice_set(buffer, 0, t);
-
-	return 1;
-}
-
-ssize_t write_message_size(struct slice buffer, proto_size_t size) {
-	return write_size(buffer, size);
-}
-
-ssize_t write_response_header(struct slice buffer, enum res_type res_type) {
-	if (buffer.size < 1) {
-		return WRITE_ERR;
-	}
-	slice_set(buffer, 0, res_type);
-
-	return 1;
-}
-
-ssize_t write_nil_response(struct slice buffer) {
-	const void *init = buffer.data;
-	ssize_t res = write_response_header(buffer, RES_OK);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	res = write_obj_type(buffer, SER_NIL);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	return buffer.data - init;
-}
-
-ssize_t write_int_response(struct slice buffer, int_val_t n) {
-	const void *init = buffer.data;
-	ssize_t res = write_response_header(buffer, RES_OK);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	res = write_int_value(buffer, n);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	return buffer.data - init;
-}
-
-ssize_t write_str_response(struct slice buffer, struct const_slice str) {
-	const void *init = buffer.data;
-	ssize_t res = write_response_header(buffer, RES_OK);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	res = write_str_value(buffer, str);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	return buffer.data - init;
-}
-
-ssize_t write_arr_response_header(struct slice buffer, size_t size) {
-	const void *init = buffer.data;
-	ssize_t res = write_response_header(buffer, RES_OK);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	res = write_array_header(buffer, size);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	return buffer.data - init;
-}
-
-ssize_t write_err_response(struct slice buffer, const char *msg) {
-	const void *init = buffer.data;
-	ssize_t res = write_response_header(buffer, RES_ERR);
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	res = write_str_value(buffer, make_str_slice(msg));
-	if (res < 0) {
-		return WRITE_ERR;
-	}
-	slice_advance(&buffer, res);
-
-	return buffer.data - init;
 }
 
 ssize_t parse_request(struct request *req, struct const_slice buffer) {
@@ -301,6 +133,69 @@ ssize_t parse_request(struct request *req, struct const_slice buffer) {
 	}
 
 	return buffer.data - init_buf_start;
+}
+
+static void write_size(struct buffer *b, proto_size_t size) {
+	buffer_ensure_cap(b, PROTO_SIZE_SIZE);
+	memcpy(buffer_tail(b), &size, PROTO_SIZE_SIZE);
+	b->size += PROTO_SIZE_SIZE;
+}
+
+void write_message_size_at(void *buf, proto_size_t size) {
+	memcpy(buf, &size, PROTO_SIZE_SIZE);
+}
+
+void write_obj_type(struct buffer *b, enum proto_type t) {
+	buffer_append_byte(b, t);
+}
+
+void write_nil_value(struct buffer *b) {
+	write_obj_type(b, SER_NIL);
+}
+
+void write_int_value(struct buffer *b, int_val_t n) {
+	write_obj_type(b, SER_INT);
+	buffer_append(b, &n, INT_VAL_SIZE);
+}
+
+void write_str_value(struct buffer *b, struct const_slice str) {
+	write_obj_type(b, SER_STR);
+	write_size(b, str.size);
+	buffer_append_slice(b, str);
+}
+
+void write_array_header(struct buffer *b, uint32_t arr_size) {
+	write_obj_type(b, SER_ARR);
+	write_size(b, arr_size);
+}
+
+void write_response_header(struct buffer *b, enum res_type res_type) {
+	buffer_append_byte(b, res_type);
+}
+
+void write_nil_response(struct buffer *b) {
+	write_response_header(b, RES_OK);
+	write_nil_value(b);
+}
+
+void write_int_response(struct buffer *b, int_val_t n) {
+	write_response_header(b, RES_OK);
+	write_int_value(b, n);
+}
+
+void write_str_response(struct buffer *b, struct const_slice str) {
+	write_response_header(b, RES_OK);
+	write_str_value(b, str);
+}
+
+void write_arr_response_header(struct buffer *b, uint32_t size) {
+	write_response_header(b, RES_OK);
+	write_array_header(b, size);
+}
+
+void write_err_response(struct buffer *b, const char *msg) {
+	write_response_header(b, RES_OK);
+	write_str_value(b, make_str_slice(msg));
 }
 
 static int print_object(FILE *stream, const struct req_object *o);
@@ -357,6 +252,6 @@ void read_buf_reset_start(struct read_buf *r) {
 }
 
 void write_buf_init(struct write_buf *w) {
-	w->buf_size = 0;
 	w->buf_sent = 0;
+	buffer_init(&w->buf, PROTO_MAX_MESSAGE_SIZE);
 }
