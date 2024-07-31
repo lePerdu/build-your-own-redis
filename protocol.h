@@ -15,8 +15,6 @@ typedef uint32_t proto_size_t;
 
 #define PROTO_SIZE_SIZE (sizeof(proto_size_t))
 #define PROTO_HEADER_SIZE PROTO_SIZE_SIZE
-#define PROTO_MAX_PAYLOAD_SIZE 4096
-#define PROTO_MAX_MESSAGE_SIZE (PROTO_HEADER_SIZE + PROTO_MAX_PAYLOAD_SIZE)
 
 enum proto_type {
 	SER_NIL = 0,
@@ -114,68 +112,64 @@ void write_arr_response_header(struct buffer *b, uint32_t size);
 void write_err_response(struct buffer *b, const char *msg);
 
 struct read_buf {
-	size_t buf_start;
-	size_t buf_size;
-	// Large enough to hold 1 max-sized message
-	uint8_t buf[PROTO_MAX_MESSAGE_SIZE];
+	uint32_t start;
+	struct buffer buf;
 };
 
-void read_buf_init(struct read_buf *r);
+void read_buf_init(struct read_buf *r, uint32_t init_cap);
 void read_buf_reset_start(struct read_buf *r);
+void read_buf_grow(struct read_buf *r, uint32_t extra);
 
 /**
  * Position where data can be read from the buffer.
  */
-static inline void *read_buf_start_pos(struct read_buf *r) {
-	return &r->buf[r->buf_start];
+static inline const void *read_buf_head(struct read_buf *r) {
+	return r->buf.data + r->start;
 }
 
 /**
  * Size of the data currently available.
  */
-static inline size_t read_buf_size(struct read_buf *r) {
-	return r->buf_size;
+static inline size_t read_buf_remaining(struct read_buf *r) {
+	return r->buf.size - r->start;
 }
 
 /**
  * Advance the start of the buffer after parsing data from it.
  */
-static inline void read_buf_advance(struct read_buf *r, size_t incr) {
-	r->buf_start += incr;
-	assert(r->buf_start <= sizeof(r->buf));
-
-	assert(incr <= r->buf_size);
-	r->buf_size -= incr;
+static inline void read_buf_advance(struct read_buf *r, uint32_t incr) {
+	r->start += incr;
+	assert(r->start <= r->buf.size);
 }
 
 static inline struct const_slice read_buf_head_slice(struct read_buf *r) {
-	return make_const_slice(read_buf_start_pos(r), read_buf_size(r));
+	return make_const_slice(read_buf_head(r), read_buf_remaining(r));
 }
 
 /**
  * Position into which more data can be read.
  */
-static inline void *read_buf_read_pos(struct read_buf *r) {
-	return &r->buf[r->buf_start + r->buf_size];
+static inline void *read_buf_tail(struct read_buf *r) {
+	return r->buf.data + r->buf.size;
 }
 
 /**
  * Remaining capacity in the buffer.
  */
 static inline size_t read_buf_cap(const struct read_buf *r) {
-	return sizeof(r->buf) - (r->buf_start + r->buf_size);
+	return r->buf.cap - r->buf.size;
 }
 
 /**
  * Advance the end of the buffer after reading data into it.
  */
-static inline void read_buf_inc_size(struct read_buf *r, size_t incr) {
-	r->buf_size += incr;
-	assert(r->buf_size <= sizeof(r->buf));
+static inline void read_buf_inc_size(struct read_buf *r, uint32_t incr) {
+	r->buf.size += incr;
+	assert(r->buf.size <= r->buf.cap);
 }
 
 static inline struct slice read_buf_tail_slice(struct read_buf *r) {
-	return make_slice(read_buf_read_pos(r), read_buf_cap(r));
+	return make_slice(read_buf_tail(r), read_buf_cap(r));
 }
 
 struct write_buf {
@@ -183,12 +177,12 @@ struct write_buf {
 	struct buffer buf;
 };
 
-void write_buf_init(struct write_buf *w);
+void write_buf_init(struct write_buf *w, uint32_t init_cap);
 
 /**
  * Data remaining to be sent.
  */
-static inline void *write_buf_head(struct write_buf *w) {
+static inline const void *write_buf_head(struct write_buf *w) {
 	return w->buf.data + w->buf_sent;
 }
 

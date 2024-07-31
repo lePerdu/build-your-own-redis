@@ -102,9 +102,7 @@ ssize_t parse_request(struct request *req, struct const_slice buffer) {
 	memcpy(&message_len, buffer.data, PROTO_HEADER_SIZE);
 	const_slice_advance(&buffer, PROTO_HEADER_SIZE);
 
-	if (message_len > PROTO_MAX_PAYLOAD_SIZE) {
-		return PARSE_ERR;
-	} else if (message_len > buffer.size) {
+	if (message_len > buffer.size) {
 		return PARSE_MORE;
 	}
 
@@ -238,20 +236,26 @@ void print_request(FILE *stream, const struct request *req) {
 	}
 }
 
-void read_buf_init(struct read_buf *r) {
-	r->buf_start = 0;
-	r->buf_size = 0;
+void read_buf_init(struct read_buf *r, uint32_t init_cap) {
+	r->start = 0;
+	buffer_init(&r->buf, init_cap);
 }
 
 void read_buf_reset_start(struct read_buf *r) {
-	if (r->buf_size > 0 && r->buf_start > 0) {
-		memmove(r->buf, read_buf_start_pos(r), r->buf_size);
+	uint32_t remaining = read_buf_remaining(r);
+	if (remaining > 0 && r->start > 0) {
+		memmove(r->buf.data, read_buf_head(r), remaining);
 	}
 	// Always reset this either way
-	r->buf_start = 0;
+	r->start = 0;
+	r->buf.size = remaining;
 }
 
-void write_buf_init(struct write_buf *w) {
+void read_buf_grow(struct read_buf *r, uint32_t extra) {
+	buffer_ensure_cap(&r->buf, extra);
+}
+
+void write_buf_init(struct write_buf *w, uint32_t init_cap) {
 	w->buf_sent = 0;
-	buffer_init(&w->buf, PROTO_MAX_MESSAGE_SIZE);
+	buffer_init(&w->buf, init_cap);
 }

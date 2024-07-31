@@ -20,6 +20,12 @@
 
 #define MAX_EVENTS 256
 
+#define READ_BUF_INIT_CAP 4096
+// Minimum amount of space in the buffer before expanding
+#define READ_BUF_MIN_CAP 1024
+
+#define WRITE_BUF_INIT_CAP 4096
+
 enum conn_state {
 	CONN_WAIT_READ,
 	CONN_READ_REQ,
@@ -71,8 +77,8 @@ struct server_state {
 static void conn_init(struct conn *c, int fd) {
 	c->fd = fd;
 	c->state = CONN_READ_REQ;
-	read_buf_init(&c->read_buf);
-	write_buf_init(&c->write_buf);
+	read_buf_init(&c->read_buf, READ_BUF_INIT_CAP);
+	write_buf_init(&c->write_buf, WRITE_BUF_INIT_CAP);
 }
 
 static void server_state_init(struct server_state *s, int socket_fd, int epoll_fd) {
@@ -201,17 +207,22 @@ enum read_result {
  */
 static enum read_result read_buf_fill(int fd, struct read_buf *r) {
 	// Make room for full message.
-	// TODO: Better heuristic for when to move data in buffer?
+	// TODO: Better heuristic for when to move data back
 	read_buf_reset_start(r);
 
-	size_t cap = read_buf_cap(r);
-	// TODO: Are there valid scenarios where this is desired?
-	assert(cap > 0);
+	// TODO: Better heuristic for when/how much to grow buffer
+	uint32_t cap = read_buf_cap(r);
+	if (cap < READ_BUF_MIN_CAP) {
+		read_buf_grow(r, READ_BUF_MIN_CAP);
+	}
+	cap = read_buf_cap(r);
+	// TODO: This could happen if the client sends a too-big message
+	assert(cap >= READ_BUF_MIN_CAP);
 
 	ssize_t n_read;
 	// Repeat for EINTR
 	do {
-		n_read = recv(fd, read_buf_read_pos(r), cap, 0);
+		n_read = recv(fd, read_buf_tail(r), cap, 0);
 	} while (n_read == -1 && errno == EINTR);
 
 	if (n_read == -1) {
