@@ -31,6 +31,8 @@ typedef bool (*hash_entry_cmp_fn)(
 );
 
 void hash_map_init(struct hash_map *m, uint32_t cap);
+// Entries must be freed beforehand with hash_map_iter
+void hash_map_destroy(struct hash_map *m);
 
 static inline uint32_t hash_map_size(const struct hash_map *m) {
 	return m->ht.size;

@@ -16,6 +16,10 @@ static void ht_init(struct hash_table *ht, uint32_t cap) {
 	assert(ht->data != NULL);
 }
 
+static void ht_destroy(struct hash_table *ht) {
+	free(ht->data);
+}
+
 static void ht_insert(struct hash_table *ht, struct hash_entry *entry) {
 	uint32_t index = entry->hash_code & ht->mask;
 	struct hash_entry *next = ht->data[index];
@@ -69,6 +73,10 @@ void hash_map_init(struct hash_map *m, uint32_t cap) {
 	ht_init(&m->ht, cap);
 }
 
+void hash_map_destroy(struct hash_map *m) {
+	ht_destroy(&m->ht);
+}
+
 struct hash_entry *hash_map_get(
 	const struct hash_map *m,
 	const struct hash_entry *key,
@@ -90,6 +98,7 @@ void hash_map_insert(struct hash_map *m, struct hash_entry *entry) {
 		struct hash_table new_table;
 		ht_init(&new_table, capacity * 2);
 		ht_move_entries(&new_table, &m->ht);
+		ht_destroy(&m->ht);
 		memcpy(&m->ht, &new_table, sizeof(new_table));
 	}
 }
@@ -109,11 +118,14 @@ bool hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg) {
 	for (uint32_t index = 0; index <= m->ht.mask; index++) {
 		struct hash_entry *entry = m->ht.data[index];
 		while (entry != NULL) {
+			// Get the next before before calling the callback in case the
+			// entry is freed
+			struct hash_entry *next = entry->next;
 			if (!cb(entry, arg)) {
 				return false;
 			}
 
-			entry = entry->next;
+			entry = next;
 		}
 	}
 

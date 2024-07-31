@@ -1,4 +1,6 @@
-CFLAGS = -std=c17 -Wall -Wextra -Og -g
+CFLAGS = -std=c17 -Wall -Wextra
+CFLAGS += -Og -g
+CFLAGS += -fno-omit-frame-pointer -fsanitize=address
 
 BUILD = build
 BIN = bin

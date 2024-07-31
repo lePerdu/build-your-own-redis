@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "hashmap.h"
@@ -28,6 +29,18 @@ static struct test_node *test_node_alloc(int key, int val) {
 	return n;
 }
 
+static bool destroy_entry(struct hash_entry *raw_ent, void *arg) {
+	(void)arg;
+	struct test_node *ent = container_of(raw_ent, struct test_node, entry);
+	free(ent);
+	return true;
+}
+
+static void destroy(struct hash_map *m) {
+	hash_map_iter(m, destroy_entry, NULL);
+	hash_map_destroy(m);
+}
+
 static void test_hashmap_get_missing(void) {
 	struct hash_map m;
 	hash_map_init(&m, 8);
@@ -35,6 +48,7 @@ static void test_hashmap_get_missing(void) {
 	test_key_init(&key, 5);
 	void *found = hash_map_get(&m, (void *) &key, test_node_cmp);
 	assert(found == NULL);
+	destroy(&m);
 }
 
 static void test_hashmap_get_after_insert(void) {
@@ -49,6 +63,7 @@ static void test_hashmap_get_after_insert(void) {
 	assert(found != NULL);
 	assert(found->key == 5);
 	assert(found->val == 10);
+	destroy(&m);
 }
 
 static void test_hashmap_get_other_key_after_insert(void) {
@@ -61,6 +76,7 @@ static void test_hashmap_get_other_key_after_insert(void) {
 	test_key_init(&key, 4);
 	void *found = hash_map_get(&m, (void *) &key, test_node_cmp);
 	assert(found == NULL);
+	destroy(&m);
 }
 
 static void test_hashmap_get_other_key_same_bucket_after_insert(void) {
@@ -73,6 +89,7 @@ static void test_hashmap_get_other_key_same_bucket_after_insert(void) {
 	test_key_init(&key, 5 + 8);
 	void *found = hash_map_get(&m, (void *) &key, test_node_cmp);
 	assert(found == NULL);
+	destroy(&m);
 }
 
 static void test_hashmap_get_missing_after_delete(void) {
@@ -88,6 +105,8 @@ static void test_hashmap_get_missing_after_delete(void) {
 	assert(removed == inserted);
 	assert(removed->key == 5);
 	assert(removed->val == 10);
+	free(removed);
+	destroy(&m);
 }
 
 static void test_hashmap_delete_missing(void) {
@@ -99,6 +118,7 @@ static void test_hashmap_delete_missing(void) {
 	struct test_node *removed =
 		(void *) hash_map_delete(&m, (void *) &key, test_node_cmp);
 	assert(removed == NULL);
+	destroy(&m);
 }
 
 static void test_hashmap_get_after_delete_and_reinsert(void) {
@@ -112,6 +132,7 @@ static void test_hashmap_get_after_delete_and_reinsert(void) {
 	struct test_node *removed =
 		(void *) hash_map_delete(&m, (void *) &key, test_node_cmp);
 	assert(removed != NULL);
+	free(removed);
 
 	struct test_node* new = test_node_alloc(5, 6);
 	hash_map_insert(&m, (void *) new);
@@ -122,6 +143,7 @@ static void test_hashmap_get_after_delete_and_reinsert(void) {
 	assert(found != NULL);
 	assert(found->key == 5);
 	assert(found->val == 6);
+	destroy(&m);
 }
 
 #define STRESS_TEST_COUNT 1000000
@@ -143,6 +165,7 @@ static void test_hashmap_insert_and_delete_many_entries(void) {
 		struct test_node *removed =
 			(void *)hash_map_delete(&m, (void *) &key, test_node_cmp);
 		assert(removed != NULL);
+		free(removed);
 	}
 
 	// Get odd ones
@@ -154,6 +177,8 @@ static void test_hashmap_insert_and_delete_many_entries(void) {
 		assert(found->key == i);
 		assert(found->val == i * 2);
 	}
+
+	destroy(&m);
 }
 
 void test_hashmap(void) {
