@@ -157,7 +157,7 @@ void write_arr_response_header(struct buffer *b, uint32_t size) {
 }
 
 void write_err_response(struct buffer *b, const char *msg) {
-	write_response_header(b, RES_OK);
+	write_response_header(b, RES_ERR);
 	write_str_value(b, make_str_slice(msg));
 }
 

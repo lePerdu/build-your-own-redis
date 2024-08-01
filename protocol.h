@@ -25,11 +25,7 @@ enum proto_type {
 // Helpers for deserializing
 
 ssize_t parse_int_value(int_val_t *n, struct const_slice buffer);
-/**
- * Parses a string ref from the buffer (does not copy/allocate).
- */
 ssize_t parse_str_value(struct const_slice *str, struct const_slice buffer);
-ssize_t parse_arr_value(struct slice *str);
 
 // Helpers for serializing
 
