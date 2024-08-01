@@ -14,7 +14,7 @@ SERVER_EXEC = $(BIN)/server
 
 TEST_SRCS = test.c
 TEST_OBJS = $(TEST_SRCS:%.c=$(BUILD)/%.o)
-TEST_EXEC = $(BIN)/test
+TEST_EXEC = $(BIN)/unit_test
 
 all: $(SERVER_EXEC)
 
@@ -39,15 +39,21 @@ debug_server: $(SERVER_EXEC)
 run_client: $(CLIENT_EXEC)
 	env PYTHONSTARTUP=client.py python3
 
-test: $(TEST_EXEC)
+.PHONY: run_server debug_server run_client
+
+unit_test: $(TEST_EXEC)
 	$<
 
-debug_test: $(TEST_EXEC)
+debug_unit_test: $(TEST_EXEC)
 	gdb $<
+
+test: unit_test
+
+.PHONY: unit_test debug_unit_test test
 
 clean:
 	$(RM) -r $(BUILD) $(BIN)
 
-.PHONY: run_server debug_server run_client test debug_test clean
+.PHONY: clean
 
 -include $(BUILD)/*.d
