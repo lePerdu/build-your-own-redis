@@ -1,0 +1,14 @@
+name: Bulid and run tests
+on:
+  - push
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build server
+        run: make all
+      - name: Run unit tests
+        run: make unit_test
+      - name: Run E2E tests
+        run: make e2e_test
