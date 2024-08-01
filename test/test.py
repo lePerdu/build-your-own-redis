@@ -192,7 +192,8 @@ class TestResult:
     exc: Exception
 
     def print(self):
-        print(f'{self.name}... {'PASS' if self.passed else 'FAIL'}')
+        status = 'PASS' if self.passed else 'FAIL'
+        print(f'{self.name}... {status}')
         print()
         print('server stdout:')
         print(self.server_stdout)
