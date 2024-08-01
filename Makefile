@@ -5,6 +5,8 @@ CFLAGS += -fno-omit-frame-pointer -fsanitize=address
 BUILD = build
 BIN = bin
 
+SERVER_SRC = server
+
 COMMON_SRCS = buffer.c hashmap.c object.c protocol.c
 COMMON_OBJS = $(COMMON_SRCS:%.c=$(BUILD)/%.o)
 
@@ -18,7 +20,7 @@ TEST_EXEC = $(BIN)/unit_test
 
 all: $(SERVER_EXEC)
 
-$(BUILD)/%.o: %.c | $(BUILD)
+$(BUILD)/%.o: $(SERVER_SRC)/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -MMD -c -o $@ $<
 
 $(SERVER_EXEC): $(SERVER_OBJS)
@@ -37,7 +39,7 @@ debug_server: $(SERVER_EXEC)
 	gdb $<
 
 run_client: $(CLIENT_EXEC)
-	env PYTHONSTARTUP=client.py python3
+	env PYTHONSTARTUP=client/__init__.py python3
 
 .PHONY: run_server debug_server run_client
 
