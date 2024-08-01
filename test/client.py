@@ -93,8 +93,8 @@ def try_parse_response(buffer):
 
 
 class Client:
-    def __init__(self, host='localhost', port=1234):
-        self.conn = socket.create_connection((host, port))
+    def __init__(self, host='localhost', port=1234, *, timeout=None):
+        self.conn = socket.create_connection((host, port), timeout=timeout)
         self.recv_buf = bytearray(4096)
         self.recv_len = 0
 

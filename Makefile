@@ -38,8 +38,8 @@ run_server: $(SERVER_EXEC)
 debug_server: $(SERVER_EXEC)
 	gdb $<
 
-run_client: $(CLIENT_EXEC)
-	env PYTHONSTARTUP=client/__init__.py python3
+run_client:
+	env PYTHONSTARTUP=test/client.py python3
 
 .PHONY: run_server debug_server run_client
 
@@ -49,9 +49,12 @@ unit_test: $(TEST_EXEC)
 debug_unit_test: $(TEST_EXEC)
 	gdb $<
 
-test: unit_test
+e2e_test: $(SERVER_EXEC)
+	python3 test/test.py
 
-.PHONY: unit_test debug_unit_test test
+test: unit_test e2e_test
+
+.PHONY: unit_test debug_unit_test e2e_test test
 
 clean:
 	$(RM) -r $(BUILD) $(BIN)
