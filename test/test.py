@@ -209,12 +209,18 @@ def test_pipeline_set_get_commands(server: Server):
 def test_set_and_get_10_000_keys(server: Server):
     n = 10_000
     c = server.make_client()
+
+    # Pipeline to speed things up
     for i in range(n):
-        res, val = c.send(ReqType.SET, f"key:{i}", f"value:{i}")
+        c.send_req(ReqType.SET, f"key:{i}", f"value:{i}")
+    for i in range(n):
+        res, val = c.recv_resp()
         assert res == RespType.OK
 
     for i in range(n):
-        res, val = c.send(ReqType.GET, f"key:{i}")
+        c.send_req(ReqType.GET, f"key:{i}")
+    for i in range(n):
+        res, val = c.recv_resp()
         assert res == RespType.OK
         assert val == f"value:{i}".encode("ascii")
 
@@ -445,12 +451,17 @@ def test_hgetall_decreases_after_hdel(server: Server):
 def test_hset_and_hget_10_000_keys(server: Server):
     n = 10_000
     c = server.make_client()
+
     for i in range(n):
-        res, val = c.send(ReqType.HSET, "hash", f"key:{i}", f"value:{i}")
+        c.send_req(ReqType.HSET, "hash", f"key:{i}", f"value:{i}")
+    for i in range(n):
+        res, val = c.recv_resp()
         assert res == RespType.OK
 
     for i in range(n):
-        res, val = c.send(ReqType.HGET, "hash", f"key:{i}")
+        c.send_req(ReqType.HGET, "hash", f"key:{i}")
+    for i in range(n):
+        res, val = c.recv_resp()
         assert res == RespType.OK
         assert val == f"value:{i}".encode("ascii")
 
