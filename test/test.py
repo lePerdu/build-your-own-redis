@@ -36,11 +36,20 @@ class ServerProc:
         )
 
 
+def read_all_and_close(file: typing.IO[bytes]) -> str:
+    try:
+        with file:
+            _ = file.seek(0)
+            return b"".join(file.readlines()).decode()
+    except IOError:
+        return ""
+
+
 class Server:
     process: subprocess.Popen[str] | None = None
-    stdout_file: typing.IO[bytes] | None = None
+    stdout_file: typing.IO[bytes]
     stdout_data: str | None = None
-    stderr_file: typing.IO[bytes] | None = None
+    stderr_file: typing.IO[bytes]
     stderr_data: str | None = None
 
     def __init__(self):
@@ -80,13 +89,8 @@ class Server:
         assert self.process is not None
         self.close()
 
-        assert self.stdout_file is not None
-        self.stdout_data = b"".join(self.stdout_file.readlines()).decode()
-        self.stdout_file.close()
-
-        assert self.stderr_file is not None
-        self.stderr_data = b"".join(self.stderr_file.readlines()).decode()
-        self.stderr_file.close()
+        self.stdout_data = read_all_and_close(self.stdout_file)
+        self.stderr_data = read_all_and_close(self.stderr_file)
 
     def get_output(self) -> tuple[str, str]:
         if self.process is None:
