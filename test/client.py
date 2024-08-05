@@ -1,5 +1,6 @@
 import enum
 import socket
+import time
 
 class Request(enum.IntEnum):
     GET = 0
@@ -92,9 +93,31 @@ def try_parse_response(buffer):
     return (resp_code, obj), rest
 
 
+def retry_for_connection(target, timeout, *, poll_interval=0.01):
+    """Wrapper around `socket.create_connection` which waits for the server to
+    accept connections."""
+    if timeout is not None:
+        start_time = time.perf_counter()
+        end_time = start_time + timeout
+    while True:
+        if timeout is not None:
+            remaining = end_time - time.perf_counter()
+            if remaining < 0:
+                raise TimeoutError(
+                    f'{target} not accepting connections after {timeout} seconds'
+                )
+        else:
+            remaining = None
+
+        try:
+            return socket.create_connection(target, timeout=remaining)
+        except ConnectionRefusedError:
+            time.sleep(poll_interval)
+
+
 class Client:
-    def __init__(self, host='localhost', port=1234, *, timeout=None):
-        self.conn = socket.create_connection((host, port), timeout=timeout)
+    def __init__(self, host='127.0.0.1', port=1234, *, timeout=None):
+        self.conn = retry_for_connection((host, port), timeout=timeout)
         self.recv_buf = bytearray(4096)
         self.recv_len = 0
 
