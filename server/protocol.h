@@ -41,6 +41,13 @@ enum req_type {
 	REQ_DEL = 2,
 	REQ_KEYS = 3,
 
+	REQ_HGET = 16,
+	REQ_HSET = 17,
+	REQ_HDEL = 18,
+	REQ_HLEN = 19,
+	REQ_HKEYS = 20,
+	REQ_HGETALL = 21,
+
 	REQ_MAX_ID,
 };
 

@@ -53,7 +53,9 @@ struct object *store_get(struct store *store, struct const_slice key) {
 	}
 }
 
-void store_set(struct store *store, struct const_slice key, struct object val) {
+struct object *store_set(
+	struct store *store, struct const_slice key, struct object val
+) {
 	// TODO: Re-structure hashmap API to avoid double hashing when inserting?
 	struct store_key key_ent = {
 		.entry.hash_code = slice_hash(key),
@@ -66,11 +68,13 @@ void store_set(struct store *store, struct const_slice key, struct object val) {
 	if (existing == NULL) {
 		struct store_entry *new_ent = store_entry_alloc(key, val);
 		hash_map_insert(&store->map, &new_ent->entry);
+		return &new_ent->val;
 	} else {
 		struct store_entry *existing_ent =
 			container_of(existing, struct store_entry, entry);
 		object_destroy(existing_ent->val);
 		existing_ent->val = val;
+		return &existing_ent->val;
 	}
 }
 

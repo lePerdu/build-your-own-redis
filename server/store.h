@@ -32,7 +32,9 @@ static inline uint32_t store_size(const struct store *s) {
 }
 
 struct object *store_get(struct store *s, struct const_slice key);
-void store_set(struct store *s, struct const_slice key, struct object val);
+struct object *store_set(
+	struct store *s, struct const_slice key, struct object val
+);
 bool store_del(struct store *s, struct const_slice key);
 
 typedef bool (*store_iter_fn)(

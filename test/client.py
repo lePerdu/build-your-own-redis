@@ -12,6 +12,13 @@ class ReqType(enum.IntEnum):
     DEL = 2
     KEYS = 3
 
+    HGET = 16
+    HSET = 17
+    HDEL = 18
+    HLEN = 19
+    HKEYS = 20
+    HGETALL = 21
+
 
 class RespType(enum.IntEnum):
     OK = 0
