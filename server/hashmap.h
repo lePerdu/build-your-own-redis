@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "types.h"
+
 #define container_of(ptr, type, member) \
 	((type *)((void *)(ptr) - offsetof(type, member)))
 
@@ -50,5 +52,7 @@ struct hash_entry *hash_map_delete(
 
 typedef bool (*hash_entry_iter_fn)(struct hash_entry *entry, void *arg);
 bool hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg);
+
+hash_t slice_hash(struct const_slice s); 
 
 #endif

@@ -14,10 +14,8 @@
 #include <unistd.h>
 
 #include "buffer.h"
-#include "hashmap.h"
-#include "object.h"
+#include "commands.h"
 #include "protocol.h"
-#include "types.h"
 
 #define MAX_EVENTS 256
 
@@ -37,8 +35,8 @@ enum conn_state {
 };
 
 struct req_parser {
-	struct request req;
-	int arg_count;
+	const struct command *cmd;
+	struct req_object args[COMMAND_ARGS_MAX];
 	int parsed_args;
 };
 
@@ -57,26 +55,11 @@ struct conn {
 
 };
 
-struct store_entry {
-	struct hash_entry entry;
-
-	// Owned
-	struct slice key;
-	// Owned
-	struct object val;
-};
-
-// Same memory layout, but with different const modifiers
-struct store_key {
-	struct hash_entry entry;
-	struct const_slice key;
-};
-
 struct server_state {
 	int socket_fd;
 	int epoll_fd;
 
-	struct hash_map store;
+	struct store store;
 
 	// Free-list of connection objects
 	struct conn *connection_pool;
@@ -85,8 +68,7 @@ struct server_state {
 };
 
 static void req_parser_init(struct req_parser *p) {
-	p->req.type = REQ_UNKNOWN;
-	p->arg_count = 0;
+	p->cmd = NULL;
 	p->parsed_args = 0;
 }
 
@@ -105,7 +87,7 @@ static void server_state_init(
 ) {
 	s->socket_fd = socket_fd;
 	s->epoll_fd = epoll_fd;
-	hash_map_init(&s->store, 16);
+	store_init(&s->store);
 	s->connection_pool = NULL;
 	s->active_connections = NULL;
 }
@@ -320,215 +302,31 @@ static void handle_read_req(struct conn *conn) {
 	}
 }
 
-static hash_t slice_hash(struct const_slice s) {
-	const uint8_t *data = s.data;
-    hash_t h = 0x811C9DC5;
-    for (size_t i = 0; i < s.size; i++) {
-        h = (h + data[i]) * 0x01000193;
-    }
-    return h;
-}
-
-static bool store_ent_compare(
-	const struct hash_entry *raw_a, const struct hash_entry *raw_b
-) {
-  const struct store_entry *a = container_of(raw_a, struct store_entry, entry);
-  const struct store_entry *b = container_of(raw_b, struct store_entry, entry);
-
-  return (a->key.size == b->key.size &&
-          memcmp(a->key.data, b->key.data, a->key.size) == 0);
-}
-
-static void write_object_response(struct buffer *b, struct object o) {
-	write_response_header(b, RES_OK);
-	write_object(b, o);
-}
-
-static void do_get(
-	struct hash_map *store,
-	const struct req_object args[1],
-	struct buffer *out_buf
-) {
-	if (args[0].type != SER_STR) {
-		write_err_response(out_buf, "invalid key");
-		return;
-	}
-
-	struct const_slice key = to_const_slice(args[0].str_val);
-	struct store_key store_key = {
-		.entry.hash_code = slice_hash(key),
-		.key = key,
-	};
-
-	struct store_entry *entry = (void *)hash_map_get(
-		store, (void*)&store_key, store_ent_compare
-	);
-	if (entry == NULL) {
-		write_err_response(out_buf, "not found");
-		return;
-	}
-
-	write_object_response(out_buf, entry->val);
-}
-
-static struct store_entry *store_entry_alloc(
-	struct const_slice key, struct object val
-) {
-	struct store_entry *new = malloc(sizeof(*new));
-	assert(new != NULL);
-	new->entry.hash_code = slice_hash(key);
-	new->key = slice_dup(key);
-	new->val = val;
-	return new;
-}
-
-static void store_entry_free(struct store_entry *ent) {
-	free(ent->key.data);
-	object_destroy(ent->val);
-	free(ent);
-}
-
-static struct object make_object_from_req(struct req_object *req_o) {
-	switch (req_o->type) {
-        case SER_INT:
-			return make_int_object(req_o->int_val);
-        case SER_STR: {
-			struct object new = make_slice_object(req_o->str_val);
-			// Mark as NIL since the value has been moved out
-			req_o->type = SER_NIL;
-			return new;
-		}
-		default:
-			assert(false);
-	}
-}
-
-static void do_set(
-	struct hash_map *store,
-	struct req_object args[2],
-	struct buffer *out_buf
-) {
-	if (args[0].type != SER_STR) {
-		write_err_response(out_buf, "invalid key");
-		return;
-	}
-
-	struct const_slice key = to_const_slice(args[0].str_val);
-	struct object val = make_object_from_req(&args[1]);
-
-	// TODO: Re-structure hashmap API to avoid double hashing when inserting?
-	struct store_key store_key = {
-		.entry.hash_code = slice_hash(key),
-		.key = key,
-	};
-
-	struct store_entry *existing = (void *)hash_map_get(
-		store, (void*)&store_key, store_ent_compare
-	);
-	if (existing == NULL) {
-		struct store_entry *new_ent = store_entry_alloc(key, val);
-		hash_map_insert(store, (void *)new_ent);
-	} else {
-		object_destroy(existing->val);
-		existing->val = val;
-	}
-
-	write_nil_response(out_buf);
-}
-
-static void do_del(
-	struct hash_map *store,
-	const struct req_object args[1],
-	struct buffer *out_buf
-) {
-	if (args[0].type != SER_STR) {
-		write_err_response(out_buf, "invalid key");
-		return;
-	}
-
-	struct const_slice key = to_const_slice(args[0].str_val);
-	struct store_key store_key = {
-		.entry.hash_code = slice_hash(key),
-		.key = key,
-	};
-
-	struct store_entry *entry = (void *)hash_map_delete(
-		store, (void*)&store_key, store_ent_compare
-	);
-	if (entry == NULL) {
-		write_err_response(out_buf, "not found");
-		return;
-	}
-	store_entry_free(entry);
-
-	write_nil_response(out_buf);
-}
-
-static bool append_key_to_response(struct hash_entry *raw_entry, void *arg) {
-	struct buffer *out_buf = arg;
-	struct store_entry *entry =
-		container_of(raw_entry, struct store_entry, entry);
-
-	write_str_value(out_buf, to_const_slice(entry->key));
-	return true;
-}
-
-static void do_keys(
-	struct hash_map *store,
-	struct buffer *out_buf
-) {
-	write_arr_response_header(out_buf, hash_map_size(store));
-
-	hash_map_iter(store, append_key_to_response, out_buf);
-}
-
-static void do_request(
-	struct conn *conn, struct hash_map *store, struct request *req
-) {
-	fprintf(stderr, "from client [%d]: ", conn->fd);
-	print_request(stderr, req);
-	putc('\n', stderr);
-
-	struct buffer *out_buf = &conn->write_buf.buf;
-	switch (req->type) {
-        case REQ_GET:
-			do_get(store, req->args, out_buf);
-			break;
-        case REQ_SET:
-			do_set(store, req->args, out_buf);
-			break;
-        case REQ_DEL:
-			do_del(store, req->args, out_buf);
-			break;
-		case REQ_KEYS:
-			do_keys(store, out_buf);
-			break;
-		default:
-			assert(false);
-	}
-}
-
 static enum parse_result run_req_parser(struct conn *conn) {
 	struct req_parser *parser = &conn->req_parser;
 
 	ssize_t res;
-	if (parser->req.type == REQ_UNKNOWN) {
+	if (parser->cmd == NULL) {
+		enum req_type type;
 		res = parse_req_type(
-			&parser->req.type, offset_buf_head_slice(&conn->read_buf)
+			&type, offset_buf_head_slice(&conn->read_buf)
 		);
 		if (res < 0) {
 			return res;
 		}
-		offset_buf_advance(&conn->read_buf, res);
 
-		parser->arg_count = request_arg_count(parser->req.type);
-		assert(parser->arg_count >= 0);
+		parser->cmd = lookup_command(type);
+		if (parser->cmd == NULL) {
+			return PARSE_ERR;
+		}
 		parser->parsed_args = 0;
+
+		offset_buf_advance(&conn->read_buf, res);
 	}
 
-	while (parser->parsed_args < parser->arg_count) {
+	while (parser->parsed_args < parser->cmd->arg_count) {
 		res = parse_req_object(
-			&parser->req.args[parser->parsed_args],
+			&parser->args[parser->parsed_args],
 			offset_buf_head_slice(&conn->read_buf)
 		);
 		if (res < 0) {
@@ -542,15 +340,14 @@ static enum parse_result run_req_parser(struct conn *conn) {
 }
 
 static void reset_req_parser(struct req_parser *p) {
-	p->req.type = REQ_UNKNOWN;
+	p->cmd = NULL;
 	for (int i = 0; i < p->parsed_args; i++) {
-		req_object_destroy(&p->req.args[i]);
+		req_object_destroy(&p->args[i]);
 	}
-	p->arg_count = 0;
 	p->parsed_args = 0;
 }
 
-static void handle_process_req(struct conn *conn, struct hash_map *store) {
+static void handle_process_req(struct conn *conn, struct store *store) {
 	ssize_t parsed_size = run_req_parser(conn);
 	switch (parsed_size) {
 		case PARSE_ERR:
@@ -563,10 +360,15 @@ static void handle_process_req(struct conn *conn, struct hash_map *store) {
 			return;
 	}
 
-	assert(parsed_size >= 0);
+	assert(parsed_size == PARSE_OK);
 	offset_buf_advance(&conn->read_buf, parsed_size);
 
-	do_request(conn, store, &conn->req_parser.req);
+	fprintf(stderr, "from client [%d]: ", conn->fd);
+	print_request(stderr, conn->req_parser.cmd, conn->req_parser.args);
+	fputc('\n', stderr);
+
+	struct buffer *out_buf = &conn->write_buf.buf;
+	conn->req_parser.cmd->handler(store, conn->req_parser.args, out_buf);
 	reset_req_parser(&conn->req_parser);
 	conn->state = CONN_WRITE_RES;
 }

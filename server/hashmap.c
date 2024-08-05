@@ -131,3 +131,13 @@ bool hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg) {
 
 	return true;
 }
+
+hash_t slice_hash(struct const_slice s) {
+	const uint8_t *data = s.data;
+    hash_t h = 0x811C9DC5;
+    for (size_t i = 0; i < s.size; i++) {
+        h = (h + data[i]) * 0x01000193;
+    }
+    return h;
+}
+

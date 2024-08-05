@@ -25,14 +25,6 @@ static void test_parse_req_type(void) {
 	assert(type == REQ_GET);
 }
 
-static void test_parse_req_type_invalid(void) {
-	uint8_t buffer[] = { 245 };
-
-	enum req_type type;
-	ssize_t n = parse_req_type(&type, make_array_const_slice(buffer));
-	assert(n == PARSE_ERR);
-}
-
 static void test_parse_req_type_empty_buffer(void) {
 	enum req_type type;
 	ssize_t n = parse_req_type(&type, make_const_slice(NULL, 0));
@@ -189,7 +181,6 @@ static void test_write_arr_response(void) {
 
 void test_parser(void) {
 	RUN_TEST(test_parse_req_type);
-	RUN_TEST(test_parse_req_type_invalid);
 	RUN_TEST(test_parse_req_type_empty_buffer);
 
 	RUN_TEST(test_parse_req_object_int);

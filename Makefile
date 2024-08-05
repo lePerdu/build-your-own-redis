@@ -7,7 +7,7 @@ BIN = bin
 
 SERVER_SRC = server
 
-COMMON_SRCS = buffer.c hashmap.c object.c protocol.c
+COMMON_SRCS = buffer.c commands.c hashmap.c object.c protocol.c store.c
 COMMON_OBJS = $(COMMON_SRCS:%.c=$(BUILD)/%.o)
 
 SERVER_SRCS = server.c

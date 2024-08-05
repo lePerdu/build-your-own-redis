@@ -41,6 +41,14 @@ int request_arg_count(enum req_type t) {
 		case REQ_SET: return 2;
 		case REQ_DEL: return 1;
 		case REQ_KEYS: return 0;
+
+		case REQ_HGET: return 2;
+		case REQ_HSET: return 3;
+		case REQ_HDEL: return 2;
+		case REQ_HKEYS: return 1;
+		case REQ_HGETALL: return 1;
+		case REQ_HLEN: return 1;
+
 		default: return -1;
 	}
 }
@@ -62,12 +70,6 @@ ssize_t parse_req_type(enum req_type *t, struct const_slice buffer) {
 
 	*t = const_slice_get(buffer, 0);
 	const_slice_advance(&buffer, 1);
-
-	// Use this to check if the type is valid
-	int arg_count = request_arg_count(*t);
-	if (arg_count < 0) {
-		return PARSE_ERR;
-	}
 	return 1;
 }
 
@@ -161,9 +163,7 @@ void write_err_response(struct buffer *b, const char *msg) {
 	write_str_value(b, make_str_slice(msg));
 }
 
-static int print_object(FILE *stream, const struct req_object *o);
-
-static int print_object(FILE *stream, const struct req_object *o) {
+int print_req_object(FILE *stream, const struct req_object *o) {
 	switch (o->type) {
 		case SER_NIL:
 			return fprintf(stream, "<NIL>");
@@ -177,28 +177,5 @@ static int print_object(FILE *stream, const struct req_object *o) {
 			);
 		default:
 			return fprintf(stream, "<INVALID>");
-	}
-}
-
-static const char *request_name(enum req_type t) {
-	switch (t) {
-        case REQ_GET: return "GET";
-        case REQ_SET: return "SET";
-        case REQ_DEL: return "DEL";
-		case REQ_KEYS: return "KEYS";
-		default: return "UNKNOWN";
-	}
-}
-
-void print_request(FILE *stream, const struct request *req) {
-	const char *name = request_name(req->type);
-	int arg_count = request_arg_count(req->type);
-
-	fprintf(stream, "%s", name);
-	if (arg_count > 0) {
-		for (int i = 0; i < arg_count; i++) {
-			fputc(' ', stream);
-			print_object(stream, &req->args[i]);
-		}
 	}
 }
