@@ -1,16 +1,19 @@
 import enum
+import math
 import socket
 import time
+from collections.abc import Buffer
+from types import TracebackType
 
 
-class Request(enum.IntEnum):
+class ReqType(enum.IntEnum):
     GET = 0
     SET = 1
     DEL = 2
     KEYS = 3
 
 
-class Response(enum.IntEnum):
+class RespType(enum.IntEnum):
     OK = 0
     ERR = 1
 
@@ -20,6 +23,12 @@ class ObjType(enum.IntEnum):
     INT = 1
     STR = 2
     ARR = 3
+
+
+ReqObject = int | str | bytes
+RespObject = None | int | bytes | list["RespObject"]
+
+Response = tuple[RespType, RespObject]
 
 
 class ProtocolError(Exception):
@@ -38,7 +47,7 @@ class NotEnoughData(Exception):
     pass
 
 
-def extend_with_arg(buffer, arg):
+def extend_with_arg(buffer: bytearray, arg: ReqObject):
     if isinstance(arg, int):
         buffer.append(ObjType.INT)
         buffer.extend(arg.to_bytes(8, "little"))
@@ -48,15 +57,15 @@ def extend_with_arg(buffer, arg):
         arg = arg.encode("ascii")
         buffer.extend(len(arg).to_bytes(4, "little"))
         buffer.extend(arg)
-    elif isinstance(arg, bytes):
+    else:
+        assert isinstance(arg, bytes), f"Invalid request argument type: {type(arg)}"
         buffer.append(ObjType.STR)
         buffer.extend(len(arg).to_bytes(4, "little"))
         buffer.extend(arg)
-    else:
-        raise TypeError(f"Invalid request argument type: {type(arg)}")
 
 
-def try_parse_object(buffer):
+def try_parse_object(buffer: Buffer) -> tuple[RespObject, Buffer]:
+    buffer = memoryview(buffer)
     if len(buffer) == 0:
         raise NotEnoughData
 
@@ -82,7 +91,7 @@ def try_parse_object(buffer):
 
         arr_len = int.from_bytes(buffer[:4], "little")
         buffer = buffer[4:]
-        arr = []
+        arr: list[RespObject] = []
         for _ in range(arr_len):
             elem, buffer = try_parse_object(buffer)
             arr.append(elem)
@@ -91,43 +100,56 @@ def try_parse_object(buffer):
         raise ParseError(f"Invalid response type: f{type_byte}")
 
 
-def try_parse_response(buffer):
+def try_parse_response(buffer: Buffer) -> tuple[Response, Buffer]:
+    buffer = memoryview(buffer)
+
     if len(buffer) == 0:
         raise NotEnoughData
-    resp_code = Response(buffer[0])
+    resp_code = RespType(buffer[0])
     obj, rest = try_parse_object(buffer[1:])
     return (resp_code, obj), rest
 
 
-def retry_for_connection(target, timeout, *, poll_interval=0.01):
+def retry_for_connection(
+    address: tuple[str | None, int],
+    timeout: float | None,
+    *,
+    poll_interval: float = 0.01,
+) -> socket.socket:
     """Wrapper around `socket.create_connection` which waits for the server to
     accept connections."""
+    start_time = time.perf_counter()
     if timeout is not None:
-        start_time = time.perf_counter()
         end_time = start_time + timeout
+    else:
+        end_time = math.inf
     while True:
-        if timeout is not None:
-            remaining = end_time - time.perf_counter()
-            if remaining < 0:
-                raise TimeoutError(
-                    f"{target} not accepting connections after {timeout} seconds"
-                )
-        else:
-            remaining = None
+        remaining = end_time - time.perf_counter()
+        if remaining < 0:
+            raise TimeoutError(
+                f"{address} not accepting connections after {timeout} seconds"
+            )
 
         try:
-            return socket.create_connection(target, timeout=remaining)
+            return socket.create_connection(address, timeout=remaining)
         except ConnectionRefusedError:
             time.sleep(poll_interval)
 
 
 class Client:
-    def __init__(self, host="127.0.0.1", port=1234, *, timeout=None):
+    conn: socket.socket
+    recv_buf: bytearray
+    recv_len: int
+
+    def __init__(
+        self, host: str = "127.0.0.1", port: int = 1234, *, timeout: float | None = None
+    ):
         self.conn = retry_for_connection((host, port), timeout=timeout)
         self.recv_buf = bytearray(4096)
         self.recv_len = 0
 
-    def _send(self, request, *args):
+    def send_req(self, request: ReqType, *args: ReqObject):
+        """Send a single request, but don't wait for the response."""
         buffer = bytearray()
         buffer.append(request)
         for a in args:
@@ -136,7 +158,8 @@ class Client:
         print("sending", buffer)
         self.conn.sendall(buffer)
 
-    def _recv(self):
+    def recv_resp(self) -> Response:
+        """Receive a single response."""
         # TODO: Reduce the amount of copies
         while True:
             try:
@@ -160,9 +183,21 @@ class Client:
                 raise UnexpectedEofError
             self.recv_len += chunk_len
 
-    def send(self, request, *args):
-        self._send(request, *args)
-        return self._recv()
+    def send(self, request: ReqType, *args: ReqObject) -> Response:
+        """Send and receive a single response."""
+        self.send_req(request, *args)
+        return self.recv_resp()
 
     def close(self):
         self.conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_value: BaseException | None,
+        _traceback: TracebackType | None,
+    ):
+        self.close()
