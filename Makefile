@@ -65,7 +65,10 @@ compile_commands:
 format:
 	clang-format -i $(SERVER_SRC)/*
 
-.PHONY: format
+check_format:
+	clang-format --Werror --dry-run $(SERVER_SRC)/*
+
+.PHONY: format check_format
 
 clean:
 	$(RM) -r $(BUILD) $(BIN)

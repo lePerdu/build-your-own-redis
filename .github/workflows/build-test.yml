@@ -11,6 +11,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Check formatting
+        run: make check_format
+        continue-on-error: true
+
       - name: Build server
         run: make all
       - name: Run unit tests
