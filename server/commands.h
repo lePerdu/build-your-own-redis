@@ -7,21 +7,17 @@
 #define COMMAND_ARGS_MAX 3
 
 typedef void (*command_handler)(
-	struct store *store,
-	struct req_object *args,
-	struct buffer *res_buf
-);
+    struct store *store, struct req_object *args, struct buffer *res_buf);
 
 struct command {
-	const char *name;
-	uint8_t arg_count;
-	command_handler handler;
+  const char *name;
+  uint8_t arg_count;
+  command_handler handler;
 };
 
 const struct command *lookup_command(enum req_type t);
 
 void print_request(
-	FILE *stream, const struct command *cmd, const struct req_object *args
-);
+    FILE *stream, const struct command *cmd, const struct req_object *args);
 
 #endif

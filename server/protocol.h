@@ -7,8 +7,8 @@
 #include <stdio.h>
 #include <sys/types.h>
 
-#include "types.h"
 #include "buffer.h"
+#include "types.h"
 
 typedef uint32_t proto_size_t;
 
@@ -16,10 +16,10 @@ typedef uint32_t proto_size_t;
 #define PROTO_HEADER_SIZE PROTO_SIZE_SIZE
 
 enum proto_type {
-	SER_NIL = 0,
-	SER_INT = 1,
-	SER_STR = 2,
-	SER_ARR = 3,
+  SER_NIL = 0,
+  SER_INT = 1,
+  SER_STR = 2,
+  SER_ARR = 3,
 };
 
 // Helpers for deserializing
@@ -36,19 +36,19 @@ void write_str_value(struct buffer *b, struct const_slice str);
 void write_array_header(struct buffer *b, uint32_t n);
 
 enum req_type {
-	REQ_GET = 0,
-	REQ_SET = 1,
-	REQ_DEL = 2,
-	REQ_KEYS = 3,
+  REQ_GET = 0,
+  REQ_SET = 1,
+  REQ_DEL = 2,
+  REQ_KEYS = 3,
 
-	REQ_HGET = 16,
-	REQ_HSET = 17,
-	REQ_HDEL = 18,
-	REQ_HLEN = 19,
-	REQ_HKEYS = 20,
-	REQ_HGETALL = 21,
+  REQ_HGET = 16,
+  REQ_HSET = 17,
+  REQ_HDEL = 18,
+  REQ_HLEN = 19,
+  REQ_HKEYS = 20,
+  REQ_HGETALL = 21,
 
-	REQ_MAX_ID,
+  REQ_MAX_ID,
 };
 
 static_assert(REQ_MAX_ID <= UINT8_MAX, "Too many requests to fit in 1 byte");
@@ -58,29 +58,29 @@ static_assert(REQ_MAX_ID <= UINT8_MAX, "Too many requests to fit in 1 byte");
  * NIL, STR and INT.
  */
 struct req_object {
-	enum proto_type type;
-	union {
-		int_val_t int_val;
-		/** Owned string value */
-		struct slice str_val;
-		// TODO: Support string refs when data is still around
-	};
+  enum proto_type type;
+  union {
+    int_val_t int_val;
+    /** Owned string value */
+    struct slice str_val;
+    // TODO: Support string refs when data is still around
+  };
 };
 
 enum parse_result {
-	PARSE_OK = 0,
-	PARSE_ERR = -1,
-	PARSE_MORE = -2,
+  PARSE_OK = 0,
+  PARSE_ERR = -1,
+  PARSE_MORE = -2,
 };
 
 enum res_type {
-	RES_OK = 0,
-	RES_ERR = 1,
+  RES_OK = 0,
+  RES_ERR = 1,
 };
 
 enum write_result {
-	WRITE_OK = 0,
-	WRITE_ERR = -1,
+  WRITE_OK = 0,
+  WRITE_ERR = -1,
 };
 
 void req_object_destroy(struct req_object *o);

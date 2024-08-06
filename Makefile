@@ -62,6 +62,11 @@ compile_commands:
 
 .PHONY: compile_commands
 
+format:
+	clang-format -i $(SERVER_SRC)/*
+
+.PHONY: format
+
 clean:
 	$(RM) -r $(BUILD) $(BIN)
 
