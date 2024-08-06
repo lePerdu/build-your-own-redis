@@ -3,7 +3,16 @@ on:
   - push
 
 jobs:
-  build-test:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting
+        run: make check_format
+      - name: Check linting
+        run: make check
+
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -11,11 +20,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Check formatting
-        run: make check_format
-        continue-on-error: true
-
-      - name: Build server
+      - name: Build
         run: make all
       - name: Run unit tests
         run: make unit_test
