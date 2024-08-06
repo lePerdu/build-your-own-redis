@@ -60,12 +60,15 @@ test: unit-test e2e-test
 
 .PHONY: unit-test debug-unit-test e2e-test test
 
-compile-commands:
+# Use the file as a target for building as needed
+# Use `compile-commands` as a target to force re-building
+compile_commands.json: Makefile
+compile_commands.json compile-commands:
 	bear -- $(MAKE) CFLAGS="$(CFLAGS_BASE)" clean all
 
 .PHONY: compile-commands
 
-check:
+check: compile_commands.json
 	$(CLANG_TIDY) --warnings-as-errors='*' $(SERVER_SRC)/*
 
 format:
