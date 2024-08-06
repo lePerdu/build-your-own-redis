@@ -1,6 +1,7 @@
-CFLAGS = -std=c17 -Wall -Wextra
-CFLAGS += -Og -g
-CFLAGS += -fno-omit-frame-pointer -fsanitize=address
+CFLAGS_BASE = -std=c17 -Wall -Wextra
+CFLAGS_OPT = -Og -g -fno-omit-frame-pointer -fsanitize=address
+
+CFLAGS ?= $(CFLAGS_BASE) $(CFLAGS_OPT)
 
 BUILD = build
 BIN = bin
@@ -55,6 +56,11 @@ e2e_test: $(SERVER_EXEC)
 test: unit_test e2e_test
 
 .PHONY: unit_test debug_unit_test e2e_test test
+
+compile_commands:
+	bear -- $(MAKE) CFLAGS="$(CFLAGS_BASE)" clean all
+
+.PHONY: compile_commands
 
 clean:
 	$(RM) -r $(BUILD) $(BIN)
