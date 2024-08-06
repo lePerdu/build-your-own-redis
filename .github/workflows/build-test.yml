@@ -7,6 +7,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install BEAR tool
+        run: sudo apt-get install bear
+      - name: Build compilation DB
+        run: make compile-commands
+
       - name: Check formatting
         run: make format-check
         env:
