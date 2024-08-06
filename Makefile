@@ -33,34 +33,34 @@ $(SERVER_EXEC) $(TEST_EXEC): $(COMMON_OBJS) | $(BIN)
 $(BUILD) $(BIN):
 	mkdir -p $@
 
-run_server: $(SERVER_EXEC)
+run-server: $(SERVER_EXEC)
 	$<
 
-debug_server: $(SERVER_EXEC)
+debug-server: $(SERVER_EXEC)
 	gdb $<
 
-run_client:
+run-client:
 	env PYTHONSTARTUP=test/client.py python3
 
-.PHONY: run_server debug_server run_client
+.PHONY: run-server debug-server run-client
 
-unit_test: $(TEST_EXEC)
+unit-test: $(TEST_EXEC)
 	$<
 
-debug_unit_test: $(TEST_EXEC)
+debug-unit-test: $(TEST_EXEC)
 	gdb $<
 
-e2e_test: $(SERVER_EXEC)
+e2e-test: $(SERVER_EXEC)
 	python3 test/test.py
 
-test: unit_test e2e_test
+test: unit-test e2e-test
 
-.PHONY: unit_test debug_unit_test e2e_test test
+.PHONY: unit-test debug-unit-test e2e-test test
 
-compile_commands:
+compile-commands:
 	bear -- $(MAKE) CFLAGS="$(CFLAGS_BASE)" clean all
 
-.PHONY: compile_commands
+.PHONY: compile-commands
 
 check:
 	clang-tidy $(SERVER_SRC)/*
@@ -68,10 +68,10 @@ check:
 format:
 	clang-format -i $(SERVER_SRC)/*
 
-check_format:
+format-check:
 	clang-format --Werror --dry-run $(SERVER_SRC)/*
 
-.PHONY: check check_format format
+.PHONY: check format format-check
 
 clean:
 	$(RM) -r $(BUILD) $(BIN)
