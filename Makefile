@@ -66,7 +66,7 @@ compile-commands:
 .PHONY: compile-commands
 
 check:
-	$(CLANG_TIDY) $(SERVER_SRC)/*
+	$(CLANG_TIDY) --warnings-as-errors='*' $(SERVER_SRC)/*
 
 format:
 	$(CLANG_FORMAT) -i $(SERVER_SRC)/*
