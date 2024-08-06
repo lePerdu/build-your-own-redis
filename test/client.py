@@ -131,11 +131,14 @@ def retry_for_connection(
     else:
         end_time = math.inf
     while True:
-        remaining = end_time - time.perf_counter()
-        if remaining < 0:
-            raise TimeoutError(
-                f"{address} not accepting connections after {timeout} seconds"
-            )
+        if timeout is not None:
+            remaining = end_time - time.perf_counter()
+            if remaining < 0:
+                raise TimeoutError(
+                    f"{address} not accepting connections after {timeout} seconds"
+                )
+        else:
+            remaining = None
 
         try:
             return socket.create_connection(address, timeout=remaining)

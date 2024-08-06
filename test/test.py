@@ -75,7 +75,7 @@ class Server:
         _ = self.process.wait()
 
     def make_client(self) -> Client:
-        return Client(timeout=10)
+        return Client(timeout=5)
 
     def __enter__(self):
         return self
