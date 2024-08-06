@@ -1,13 +1,17 @@
 #include "commands.h"
 
+#include <assert.h>
+#include <stdio.h>
+
+#include "buffer.h"
 #include "object.h"
 #include "protocol.h"
 #include "store.h"
 #include "types.h"
 
-static void write_object_response(struct buffer *b, struct object *o) {
-  write_response_header(b, RES_OK);
-  write_object(b, o);
+static void write_object_response(struct buffer *out, struct object *obj) {
+  write_response_header(out, RES_OK);
+  write_object(out, obj);
 }
 
 static void do_get(
@@ -281,12 +285,12 @@ static const struct command all_commands[REQ_MAX_ID] = {
 #undef CMD
 };
 
-const struct command *lookup_command(enum req_type t) {
-  if (t >= REQ_MAX_ID) {
+const struct command *lookup_command(enum req_type type) {
+  if (type >= REQ_MAX_ID) {
     return NULL;
   }
 
-  const struct command *cmd = &all_commands[t];
+  const struct command *cmd = &all_commands[type];
   if (cmd->handler == NULL) {
     return NULL;
   }

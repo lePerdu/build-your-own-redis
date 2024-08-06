@@ -1,9 +1,9 @@
 #ifndef OBJECT_H_
 #define OBJECT_H_
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <sys/types.h>
 
 #include "buffer.h"
 #include "hashmap.h"
@@ -24,8 +24,8 @@ struct object {
   };
 };
 
-static inline bool object_is_scalar(enum obj_type t) {
-  switch (t) {
+static inline bool object_is_scalar(enum obj_type type) {
+  switch (type) {
     case OBJ_INT:
     case OBJ_STR:
       return true;
@@ -36,34 +36,30 @@ static inline bool object_is_scalar(enum obj_type t) {
   }
 }
 
-static inline struct object make_slice_object(struct slice s) {
-  return (struct object){.type = OBJ_STR, .str_val = s};
+static inline struct object make_slice_object(struct slice slice) {
+  return (struct object){.type = OBJ_STR, .str_val = slice};
 }
 
 static inline struct object make_int_object(int_val_t n) {
   return (struct object){.type = OBJ_INT, .int_val = n};
 }
 
-static inline struct object make_hmap_object(void) {
-  struct object o = {.type = OBJ_HMAP};
-  hash_map_init(&o.hmap_val, 8);
-  return o;
-}
+struct object make_hmap_object(void);
 
 /**
  * Destroys the object and all sub-objects.
  */
-void object_destroy(struct object o);
+void object_destroy(struct object obj);
 
-void write_object(struct buffer *b, struct object *o);
+void write_object(struct buffer *out, struct object *obj);
 
-struct object *hmap_get(struct object *o, struct const_slice key);
-void hmap_set(struct object *o, struct const_slice key, struct object val);
-bool hmap_del(struct object *o, struct const_slice key);
-int_val_t hmap_size(struct object *o);
+struct object *hmap_get(struct object *obj, struct const_slice key);
+void hmap_set(struct object *obj, struct const_slice key, struct object val);
+bool hmap_del(struct object *obj, struct const_slice key);
+int_val_t hmap_size(struct object *obj);
 
 typedef bool (*hmap_iter_fn)(
     struct const_slice key, struct object *val, void *arg);
-void hmap_iter(struct object *o, hmap_iter_fn cb, void *arg);
+void hmap_iter(struct object *obj, hmap_iter_fn iter, void *arg);
 
 #endif

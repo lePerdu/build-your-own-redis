@@ -26,19 +26,19 @@ struct store_key {
   struct const_slice key;
 };
 
-void store_init(struct store *s);
+void store_init(struct store *store);
 
-static inline uint32_t store_size(const struct store *s) {
-  return hash_map_size(&s->map);
+static inline uint32_t store_size(const struct store *store) {
+  return hash_map_size(&store->map);
 }
 
-struct object *store_get(struct store *s, struct const_slice key);
+struct object *store_get(struct store *store, struct const_slice key);
 struct object *store_set(
-    struct store *s, struct const_slice key, struct object val);
-bool store_del(struct store *s, struct const_slice key);
+    struct store *store, struct const_slice key, struct object val);
+bool store_del(struct store *store, struct const_slice key);
 
 typedef bool (*store_iter_fn)(
     struct const_slice key, struct object *val, void *arg);
-void store_iter(struct store *s, store_iter_fn cb, void *arg);
+void store_iter(struct store *store, store_iter_fn iter, void *arg);
 
 #endif

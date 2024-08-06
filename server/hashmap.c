@@ -5,32 +5,34 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_LOAD_FACTOR 8
+#include "types.h"
 
-static void ht_init(struct hash_table *ht, uint32_t cap) {
+enum { MAX_LOAD_FACTOR = 8 };
+
+static void ht_init(struct hash_table *table, uint32_t cap) {
   assert(cap > 0);
   assert((cap & (cap - 1)) == 0);
-  ht->mask = cap - 1;
-  ht->size = 0;
-  ht->data = calloc(sizeof(struct hash_entry *), cap);
-  assert(ht->data != NULL);
+  table->mask = cap - 1;
+  table->size = 0;
+  table->data = (struct hash_entry **)calloc(sizeof(struct hash_entry *), cap);
+  assert(table->data != NULL);
 }
 
-static void ht_destroy(struct hash_table *ht) { free(ht->data); }
+static void ht_destroy(struct hash_table *table) { free((void *)table->data); }
 
-static void ht_insert(struct hash_table *ht, struct hash_entry *entry) {
-  uint32_t index = entry->hash_code & ht->mask;
-  struct hash_entry *next = ht->data[index];
+static void ht_insert(struct hash_table *table, struct hash_entry *entry) {
+  uint32_t index = entry->hash_code & table->mask;
+  struct hash_entry *next = table->data[index];
   entry->next = next;
-  ht->data[index] = entry;
-  ht->size++;
+  table->data[index] = entry;
+  table->size++;
 }
 
 static struct hash_entry **ht_lookup(
-    const struct hash_table *ht, const struct hash_entry *key,
+    const struct hash_table *table, const struct hash_entry *key,
     hash_entry_cmp_fn compare) {
-  uint32_t index = key->hash_code & ht->mask;
-  struct hash_entry **from = &ht->data[index];
+  uint32_t index = key->hash_code & table->mask;
+  struct hash_entry **from = &table->data[index];
   while (*from != NULL) {
     if ((*from)->hash_code == key->hash_code && compare(key, *from)) {
       return from;
@@ -42,36 +44,23 @@ static struct hash_entry **ht_lookup(
 }
 
 static struct hash_entry *ht_detach(
-    struct hash_table *ht, struct hash_entry **from) {
+    struct hash_table *table, struct hash_entry **from) {
   struct hash_entry *node = *from;
   *from = node->next;
-  ht->size--;
+  table->size--;
   return node;
 }
 
-static void ht_move_entries(struct hash_table *to, struct hash_table *from) {
-  for (uint32_t index = 0; index <= from->mask; index++) {
-    struct hash_entry *entry = from->data[index];
-    while (entry != NULL) {
-      struct hash_entry *next = entry->next;
-      ht_insert(to, entry);
-      entry = next;
-      from->size--;
-    }
-    from->data[index] = NULL;
-  }
-
-  assert(from->size == 0);
+void hash_map_init(struct hash_map *map, uint32_t cap) {
+  ht_init(&map->table, cap);
 }
 
-void hash_map_init(struct hash_map *m, uint32_t cap) { ht_init(&m->ht, cap); }
-
-void hash_map_destroy(struct hash_map *m) { ht_destroy(&m->ht); }
+void hash_map_destroy(struct hash_map *map) { ht_destroy(&map->table); }
 
 struct hash_entry *hash_map_get(
-    const struct hash_map *m, const struct hash_entry *key,
+    const struct hash_map *map, const struct hash_entry *key,
     hash_entry_cmp_fn compare) {
-  struct hash_entry **location = ht_lookup(&m->ht, key, compare);
+  struct hash_entry **location = ht_lookup(&map->table, key, compare);
   if (location == NULL) {
     return NULL;
   }
@@ -79,38 +68,55 @@ struct hash_entry *hash_map_get(
   return *location;
 }
 
-void hash_map_insert(struct hash_map *m, struct hash_entry *entry) {
-  ht_insert(&m->ht, entry);
+// This helper function is very local so it's easy to check the order
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+static void ht_move_entries(struct hash_table *dst, struct hash_table *src) {
+  for (uint32_t index = 0; index <= src->mask; index++) {
+    struct hash_entry *entry = src->data[index];
+    while (entry != NULL) {
+      struct hash_entry *next = entry->next;
+      ht_insert(dst, entry);
+      entry = next;
+      src->size--;
+    }
+    src->data[index] = NULL;
+  }
 
-  uint32_t capacity = m->ht.mask + 1;
-  if (m->ht.size >= MAX_LOAD_FACTOR * capacity) {
+  assert(src->size == 0);
+}
+
+void hash_map_insert(struct hash_map *map, struct hash_entry *entry) {
+  ht_insert(&map->table, entry);
+
+  uint32_t capacity = map->table.mask + 1;
+  if (map->table.size >= MAX_LOAD_FACTOR * capacity) {
     struct hash_table new_table;
     ht_init(&new_table, capacity * 2);
-    ht_move_entries(&new_table, &m->ht);
-    ht_destroy(&m->ht);
-    memcpy(&m->ht, &new_table, sizeof(new_table));
+    ht_move_entries(&new_table, &map->table);
+    ht_destroy(&map->table);
+    memcpy(&map->table, &new_table, sizeof(new_table));
   }
 }
 
 struct hash_entry *hash_map_delete(
-    struct hash_map *m, const struct hash_entry *key,
+    struct hash_map *map, const struct hash_entry *key,
     hash_entry_cmp_fn compare) {
-  struct hash_entry **location = ht_lookup(&m->ht, key, compare);
+  struct hash_entry **location = ht_lookup(&map->table, key, compare);
   if (location == NULL) {
     return NULL;
   }
 
-  return ht_detach(&m->ht, location);
+  return ht_detach(&map->table, location);
 }
 
-bool hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg) {
-  for (uint32_t index = 0; index <= m->ht.mask; index++) {
-    struct hash_entry *entry = m->ht.data[index];
+bool hash_map_iter(struct hash_map *map, hash_entry_iter_fn iter, void *arg) {
+  for (uint32_t index = 0; index <= map->table.mask; index++) {
+    struct hash_entry *entry = map->table.data[index];
     while (entry != NULL) {
       // Get the next before before calling the callback in case the
       // entry is freed
       struct hash_entry *next = entry->next;
-      if (!cb(entry, arg)) {
+      if (!iter(entry, arg)) {
         return false;
       }
 
@@ -121,11 +127,16 @@ bool hash_map_iter(struct hash_map *m, hash_entry_iter_fn cb, void *arg) {
   return true;
 }
 
-hash_t slice_hash(struct const_slice s) {
-  const uint8_t *data = s.data;
-  hash_t h = 0x811C9DC5;
-  for (size_t i = 0; i < s.size; i++) {
-    h = (h + data[i]) * 0x01000193;
+enum {
+  HASH_SEED = 0x811C9DC5,
+  HASH_MULTIPLIER = 0x01000193,
+};
+
+hash_t slice_hash(struct const_slice slice) {
+  const uint8_t *data = slice.data;
+  hash_t hash = HASH_SEED;
+  for (size_t i = 0; i < slice.size; i++) {
+    hash = (hash + data[i]) * HASH_MULTIPLIER;
   }
-  return h;
+  return hash;
 }

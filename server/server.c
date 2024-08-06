@@ -16,14 +16,19 @@
 #include "buffer.h"
 #include "commands.h"
 #include "protocol.h"
+#include "store.h"
 
-#define MAX_EVENTS 256
+enum {
+  PORT = 1234,
 
-#define READ_BUF_INIT_CAP 4096
-// Minimum amount of space in the buffer before expanding
-#define READ_BUF_MIN_CAP 1024
+  MAX_EVENTS = 256,
 
-#define WRITE_BUF_INIT_CAP 4096
+  READ_BUF_INIT_CAP = 4096,
+  // Minimum amount of space in the buffer before expanding
+  READ_BUF_MIN_CAP = 4096,
+
+  WRITE_BUF_INIT_CAP = 4096,
+};
 
 enum conn_state {
   CONN_WAIT_READ,
@@ -66,75 +71,18 @@ struct server_state {
   struct conn *active_connections;
 };
 
-static void req_parser_init(struct req_parser *p) {
-  p->cmd = NULL;
-  p->parsed_args = 0;
-}
-
-static void conn_init(struct conn *c, int fd) {
-  c->fd = fd;
-  c->state = CONN_READ_REQ;
-
-  offset_buf_init(&c->read_buf, READ_BUF_INIT_CAP);
-  req_parser_init(&c->req_parser);
-
-  offset_buf_init(&c->write_buf, WRITE_BUF_INIT_CAP);
-}
-
-static void server_state_init(
-    struct server_state *s, int socket_fd, int epoll_fd) {
-  s->socket_fd = socket_fd;
-  s->epoll_fd = epoll_fd;
-  store_init(&s->store);
-  s->connection_pool = NULL;
-  s->active_connections = NULL;
-}
-
-static struct conn *get_available_conn(struct server_state *s) {
-  struct conn *available = s->connection_pool;
-  if (available != NULL) {
-    // prev pointers aren't used in the connection pool
-    s->connection_pool = available->next;
-  } else {
-    available = malloc(sizeof(*available));
-  }
-
-  available->prev = NULL;
-  available->next = s->active_connections;
-  s->active_connections = available;
-  if (available->next != NULL) {
-    available->next->prev = available;
-  }
-  return available;
-}
-
-static void free_conn(struct server_state *s, struct conn *c) {
-  if (c->prev != NULL) {
-    c->prev->next = c->next;
-  } else {
-    s->active_connections = c->next;
-  }
-
-  if (c->next != NULL) {
-    c->next->prev = c->prev;
-  }
-
-  c->next = s->connection_pool;
-  s->connection_pool = c;
-}
-
 [[noreturn]] static void die_errno(const char *msg) {
   perror(msg);
   exit(EXIT_FAILURE);
 }
 
-static int set_nonblocking(int fd) {
-  int flags = fcntl(fd, F_GETFL);
+static int set_nonblocking(int fildes) {
+  int flags = fcntl(fildes, F_GETFL);
   if (flags == -1) {
     return -1;
   }
 
-  flags = fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+  flags = fcntl(fildes, F_SETFL, flags | O_NONBLOCK);
   if (flags == -1) {
     return -1;
   }
@@ -147,35 +95,36 @@ static int setup_socket(void) {
   // result variable used for various syscalls
   int res;
 
-  int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-  if (fd == -1) {
+  int socket_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+  if (socket_fd == -1) {
     die_errno("failed to open socket");
   }
 
   int val = 1;
-  res = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
+  res = setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
   if (res == -1) {
     die_errno("failed to configure socket");
   }
 
   struct sockaddr_in addr = {
       .sin_family = AF_INET,
-      .sin_port = ntohs(1234),
+      .sin_port = ntohs(PORT),
       .sin_addr = {ntohl(INADDR_LOOPBACK)},
   };
-  res = bind(fd, (const struct sockaddr *)&addr, sizeof(addr));
+  res = bind(socket_fd, (const struct sockaddr *)&addr, sizeof(addr));
   if (res == -1) {
     die_errno("failed to bind socket");
   }
 
-  res = listen(fd, SOMAXCONN);
+  res = listen(socket_fd, SOMAXCONN);
   if (res == -1) {
     die_errno("failed to listen on socket");
   }
 
   struct sockaddr_in bound_addr;
   socklen_t bound_addr_size = sizeof(bound_addr);
-  res = getsockname(fd, (struct sockaddr *)&bound_addr, &bound_addr_size);
+  res =
+      getsockname(socket_fd, (struct sockaddr *)&bound_addr, &bound_addr_size);
   if (res == 0 && bound_addr.sin_family == AF_INET) {
     char addr_name[INET_ADDRSTRLEN];
     const char *addr_res =
@@ -190,7 +139,78 @@ static int setup_socket(void) {
     fprintf(stderr, "listening on unknown address\n");
   }
 
-  return fd;
+  return socket_fd;
+}
+
+static void req_parser_init(struct req_parser *parser) {
+  parser->cmd = NULL;
+  parser->parsed_args = 0;
+}
+
+static void conn_init(struct conn *conn, int fildes) {
+  conn->fd = fildes;
+  conn->state = CONN_READ_REQ;
+
+  offset_buf_init(&conn->read_buf, READ_BUF_INIT_CAP);
+  req_parser_init(&conn->req_parser);
+
+  offset_buf_init(&conn->write_buf, WRITE_BUF_INIT_CAP);
+}
+
+static void server_state_setup(struct server_state *server) {
+  server->socket_fd = setup_socket();
+
+  server->epoll_fd = epoll_create1(0);
+  if (server->epoll_fd == -1) {
+    die_errno("failed to create epoll group");
+  }
+
+  // Setup listening socket
+  struct epoll_event listen_event;
+  listen_event.events = EPOLLIN | EPOLLET;
+  listen_event.data.ptr = NULL;  // Tag to indicate the listening socket
+  int res = epoll_ctl(
+      server->epoll_fd, EPOLL_CTL_ADD, server->socket_fd, &listen_event);
+  if (res == -1) {
+    die_errno("failed to add socket to epoll group");
+  }
+
+  store_init(&server->store);
+  server->connection_pool = NULL;
+  server->active_connections = NULL;
+}
+
+static struct conn *get_available_conn(struct server_state *server) {
+  struct conn *available = server->connection_pool;
+  if (available != NULL) {
+    // prev pointers aren't used in the connection pool
+    server->connection_pool = available->next;
+  } else {
+    available = malloc(sizeof(*available));
+  }
+
+  available->prev = NULL;
+  available->next = server->active_connections;
+  server->active_connections = available;
+  if (available->next != NULL) {
+    available->next->prev = available;
+  }
+  return available;
+}
+
+static void free_conn(struct server_state *server, struct conn *conn) {
+  if (conn->prev != NULL) {
+    conn->prev->next = conn->next;
+  } else {
+    server->active_connections = conn->next;
+  }
+
+  if (conn->next != NULL) {
+    conn->next->prev = conn->prev;
+  }
+
+  conn->next = server->connection_pool;
+  server->connection_pool = conn;
 }
 
 enum read_result {
@@ -206,39 +226,41 @@ enum read_result {
  * The full buffer capacity is requested from `fd`, although this may read less
  * than the full capacity.
  */
-static enum read_result read_buf_fill(int fd, struct offset_buf *r) {
+static enum read_result read_buf_fill(
+    int conn_fd, struct offset_buf *read_buf) {
   // Make room for full message.
   // TODO: Better heuristic for when to move data back
-  offset_buf_reset_start(r);
+  offset_buf_reset_start(read_buf);
 
   // TODO: Better heuristic for when/how much to grow buffer
-  uint32_t cap = offset_buf_cap(r);
+  uint32_t cap = offset_buf_cap(read_buf);
   if (cap < READ_BUF_MIN_CAP) {
-    offset_buf_grow(r, READ_BUF_MIN_CAP);
+    offset_buf_grow(read_buf, READ_BUF_MIN_CAP);
   }
-  cap = offset_buf_cap(r);
+  cap = offset_buf_cap(read_buf);
   // TODO: This could happen if the client sends a too-big message
   assert(cap >= READ_BUF_MIN_CAP);
 
   ssize_t n_read;
   // Repeat for EINTR
   do {
-    n_read = recv(fd, offset_buf_tail(r), cap, 0);
+    n_read = recv(conn_fd, offset_buf_tail(read_buf), cap, 0);
   } while (n_read == -1 && errno == EINTR);
 
   if (n_read == -1) {
     if (errno == EAGAIN) {
       return READ_MORE;
-    } else {
-      return READ_IO_ERR;
     }
-  } else if (n_read == 0) {
-    return READ_EOF;
-  } else {
-    assert(n_read > 0);
-    offset_buf_inc_size(r, n_read);
-    return READ_OK;
+    return READ_IO_ERR;
   }
+
+  if (n_read == 0) {
+    return READ_EOF;
+  }
+
+  assert(n_read > 0);
+  offset_buf_inc_size(read_buf, n_read);
+  return READ_OK;
 }
 
 enum send_result {
@@ -247,32 +269,32 @@ enum send_result {
   SEND_MORE = -2,
 };
 
-static enum send_result write_buf_flush(int fd, struct offset_buf *wb) {
-  size_t remaining = offset_buf_remaining(wb);
+static enum send_result write_buf_flush(
+    int conn_fd, struct offset_buf *write_buf) {
+  size_t remaining = offset_buf_remaining(write_buf);
   assert(remaining > 0);
 
   ssize_t n_write;
   do {
-    n_write = send(fd, offset_buf_head(wb), remaining, MSG_NOSIGNAL);
+    n_write =
+        send(conn_fd, offset_buf_head(write_buf), remaining, MSG_NOSIGNAL);
   } while (n_write == -1 && errno == EINTR);
 
   if (n_write == -1) {
     if (errno == EAGAIN) {
       return SEND_MORE;
-    } else {
-      return SEND_IO_ERR;
     }
+    return SEND_IO_ERR;
   }
 
   assert(n_write > 0);
-  offset_buf_advance(wb, n_write);
-  remaining = offset_buf_remaining(wb);
+  offset_buf_advance(write_buf, n_write);
+  remaining = offset_buf_remaining(write_buf);
   if (remaining == 0) {
-    offset_buf_reset(wb);
+    offset_buf_reset(write_buf);
     return SEND_OK;
-  } else {
-    return SEND_MORE;
   }
+  return SEND_MORE;
 }
 
 static void handle_read_req(struct conn *conn) {
@@ -331,16 +353,16 @@ static enum parse_result run_req_parser(struct conn *conn) {
   return PARSE_OK;
 }
 
-static void reset_req_parser(struct req_parser *p) {
-  p->cmd = NULL;
-  for (int i = 0; i < p->parsed_args; i++) {
-    req_object_destroy(&p->args[i]);
+static void reset_req_parser(struct req_parser *parser) {
+  parser->cmd = NULL;
+  for (int i = 0; i < parser->parsed_args; i++) {
+    req_object_destroy(&parser->args[i]);
   }
-  p->parsed_args = 0;
+  parser->parsed_args = 0;
 }
 
 static void handle_process_req(struct conn *conn, struct store *store) {
-  ssize_t parsed_size = run_req_parser(conn);
+  enum parse_result parsed_size = run_req_parser(conn);
   switch (parsed_size) {
     case PARSE_ERR:
       fprintf(stderr, "invalid message\n");
@@ -350,9 +372,13 @@ static void handle_process_req(struct conn *conn, struct store *store) {
     case PARSE_MORE:
       conn->state = CONN_READ_REQ;
       return;
+    case PARSE_OK:
+      // Continue on
+      break;
+    default:
+      assert(false);
   }
 
-  assert(parsed_size == PARSE_OK);
   offset_buf_advance(&conn->read_buf, parsed_size);
 
   fprintf(stderr, "from client [%d]: ", conn->fd);
@@ -383,7 +409,7 @@ static void handle_write_res(struct conn *conn) {
   }
 }
 
-static void handle_end(struct server_state *s, struct conn *conn) {
+static void handle_end(struct server_state *server, struct conn *conn) {
   int res = close(conn->fd);
   if (res == -1) {
     fprintf(stderr, "failed to close socket\n");
@@ -391,10 +417,11 @@ static void handle_end(struct server_state *s, struct conn *conn) {
   fprintf(stderr, "closed connected [%d]\n", conn->fd);
 
   conn->fd = -1;
-  free_conn(s, conn);
+  free_conn(server, conn);
 }
 
-static void handle_data_available(struct server_state *s, struct conn *conn) {
+static void handle_data_available(
+    struct server_state *server, struct conn *conn) {
   // Reset wait states from poll
   if (conn->state == CONN_WAIT_READ) {
     conn->state = CONN_READ_REQ;
@@ -411,27 +438,27 @@ static void handle_data_available(struct server_state *s, struct conn *conn) {
         handle_read_req(conn);
         break;
       case CONN_PROCESS_REQ:
-        handle_process_req(conn, &s->store);
+        handle_process_req(conn, &server->store);
         break;
       case CONN_WRITE_RES:
         handle_write_res(conn);
         break;
       case CONN_CLOSE:
-        handle_end(s, conn);
+        handle_end(server, conn);
         return;
       default:
         fprintf(stderr, "Invalid state: %d\n", conn->state);
-        handle_end(s, conn);
+        handle_end(server, conn);
         return;
     }
   }
 }
 
-static void handle_new_connection(struct server_state *s) {
+static void handle_new_connection(struct server_state *server) {
   struct sockaddr_in client_addr;
   socklen_t client_addr_len = sizeof(client_addr);
-  int conn_fd =
-      accept(s->socket_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+  int conn_fd = accept(
+      server->socket_fd, (struct sockaddr *)&client_addr, &client_addr_len);
   if (conn_fd == -1) {
     perror("failed to connect to client");
     return;
@@ -441,44 +468,28 @@ static void handle_new_connection(struct server_state *s) {
     return;
   }
 
-  struct conn *new_conn = get_available_conn(s);
+  struct conn *new_conn = get_available_conn(server);
   conn_init(new_conn, conn_fd);
 
-  struct epoll_event ev = {
+  struct epoll_event conn_rw_event = {
       .events = EPOLLIN | EPOLLOUT | EPOLLET,
       .data.ptr = new_conn,
   };
-  int res = epoll_ctl(s->epoll_fd, EPOLL_CTL_ADD, conn_fd, &ev);
+  int res = epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, conn_fd, &conn_rw_event);
   if (res == -1) {
     perror("failed to add connection to epoll group");
-    handle_end(s, new_conn);
+    handle_end(server, new_conn);
     return;
   }
 
   fprintf(stderr, "openned connection [%d]\n", conn_fd);
   // Check immediately in case data is available
-  handle_data_available(s, new_conn);
+  handle_data_available(server, new_conn);
 }
 
 int main(void) {
-  int socket_fd = setup_socket();
-
-  int epoll_fd = epoll_create1(0);
-  if (epoll_fd == -1) {
-    die_errno("failed to create epoll group");
-  }
-
-  // Setup listening socket
-  struct epoll_event ev;
-  ev.events = EPOLLIN | EPOLLET;
-  ev.data.ptr = NULL;  // Tag to indicate the listening socket
-  int res = epoll_ctl(epoll_fd, EPOLL_CTL_ADD, socket_fd, &ev);
-  if (res == -1) {
-    die_errno("failed to add socket to epoll group");
-  }
-
   struct server_state server;
-  server_state_init(&server, socket_fd, epoll_fd);
+  server_state_setup(&server);
 
   while (true) {
     struct epoll_event events[MAX_EVENTS];

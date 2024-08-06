@@ -33,34 +33,34 @@ static inline struct const_slice make_str_slice(const char *str) {
   return make_const_slice(str, strlen(str));
 }
 
-static inline struct const_slice to_const_slice(struct slice s) {
-  return make_const_slice(s.data, s.size);
+static inline struct const_slice to_const_slice(struct slice slice) {
+  return make_const_slice(slice.data, slice.size);
 }
 
-static inline void slice_set(struct slice s, size_t index, uint8_t b) {
-  ((uint8_t *)s.data)[index] = b;
+static inline void slice_set(struct slice slice, size_t index, uint8_t byte) {
+  ((uint8_t *)slice.data)[index] = byte;
 }
 
-static inline uint8_t const_slice_get(struct const_slice s, size_t index) {
-  return ((const uint8_t *)s.data)[index];
+static inline uint8_t const_slice_get(struct const_slice slice, size_t index) {
+  return ((const uint8_t *)slice.data)[index];
 }
 
-static inline void slice_advance(struct slice *s, size_t n) {
-  assert(n <= s->size);
-  s->size -= n;
-  s->data += n;
+static inline void slice_advance(struct slice *slice, size_t n) {
+  assert(n <= slice->size);
+  slice->size -= n;
+  slice->data += n;
 }
 
-static inline void const_slice_advance(struct const_slice *s, size_t n) {
-  assert(n <= s->size);
-  s->size -= n;
-  s->data += n;
+static inline void const_slice_advance(struct const_slice *slice, size_t n) {
+  assert(n <= slice->size);
+  slice->size -= n;
+  slice->data += n;
 }
 
-static inline struct slice slice_dup(struct const_slice s) {
-  void *new_data = malloc(s.size);
-  memcpy(new_data, s.data, s.size);
-  return make_slice(new_data, s.size);
+static inline struct slice slice_dup(struct const_slice slice) {
+  void *new_data = malloc(slice.size);
+  memcpy(new_data, slice.data, slice.size);
+  return make_slice(new_data, slice.size);
 }
 
 #endif

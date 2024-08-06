@@ -1,6 +1,10 @@
 #ifndef COMMAND_H_
 #define COMMAND_H_
 
+#include <stdint.h>
+#include <stdio.h>
+
+#include "buffer.h"
 #include "protocol.h"
 #include "store.h"
 
@@ -15,7 +19,7 @@ struct command {
   command_handler handler;
 };
 
-const struct command *lookup_command(enum req_type t);
+const struct command *lookup_command(enum req_type type);
 
 void print_request(
     FILE *stream, const struct command *cmd, const struct req_object *args);

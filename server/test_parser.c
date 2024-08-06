@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -7,6 +8,8 @@
 #include "protocol.h"
 #include "test.h"
 #include "types.h"
+
+// NOLINTBEGIN(readability-magic-numbers)
 
 #define make_array_const_slice(arr) make_const_slice(arr, sizeof(arr))
 #define make_array_slice(arr) make_slice(arr, sizeof(arr))
@@ -21,33 +24,33 @@ static void test_parse_req_type(void) {
   uint8_t buffer[] = {REQ_GET};
 
   enum req_type type;
-  ssize_t n = parse_req_type(&type, make_array_const_slice(buffer));
-  assert(n == 1);
+  ssize_t n_parsed = parse_req_type(&type, make_array_const_slice(buffer));
+  assert(n_parsed == 1);
   assert(type == REQ_GET);
 }
 
 static void test_parse_req_type_empty_buffer(void) {
   enum req_type type;
-  ssize_t n = parse_req_type(&type, make_const_slice(NULL, 0));
-  assert(n == PARSE_MORE);
+  ssize_t n_parsed = parse_req_type(&type, make_const_slice(NULL, 0));
+  assert(n_parsed == PARSE_MORE);
 }
 
 static void test_parse_req_object_int(void) {
   uint8_t buffer[] = {SER_INT, 0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12};
 
-  struct req_object o;
-  ssize_t n = parse_req_object(&o, make_array_const_slice(buffer));
-  assert(n == 9);
-  assert(o.type = SER_INT);
-  assert(o.int_val == 0x123456789abcdef0L);
+  struct req_object obj;
+  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+  assert(n_parsed == 9);
+  assert(obj.type == SER_INT);
+  assert(obj.int_val == 0x123456789abcdef0L);
 }
 
 static void test_parse_req_object_int_need_more_data(void) {
   uint8_t buffer[] = {SER_INT, 0xf0, 0xde, 0xbc};
 
-  struct req_object o;
-  ssize_t n = parse_req_object(&o, make_array_const_slice(buffer));
-  assert(n == PARSE_MORE);
+  struct req_object obj;
+  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+  assert(n_parsed == PARSE_MORE);
 }
 
 static void test_parse_req_object_str(void) {
@@ -55,13 +58,13 @@ static void test_parse_req_object_str(void) {
       SER_STR, 5, 0, 0, 0, 'a', 'b', 'c', 'd', 'e',
   };
 
-  struct req_object o;
-  ssize_t n = parse_req_object(&o, make_array_const_slice(buffer));
-  assert(n == 10);
-  assert(o.type = SER_STR);
-  assert_slice_eq(o.str_val, make_str_slice("abcde"));
+  struct req_object obj;
+  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+  assert(n_parsed == 10);
+  assert(obj.type == SER_STR);
+  assert_slice_eq(obj.str_val, make_str_slice("abcde"));
 
-  req_object_destroy(&o);
+  req_object_destroy(&obj);
 }
 
 static void test_parse_req_object_str_need_more_data_for_len(void) {
@@ -72,31 +75,31 @@ static void test_parse_req_object_str_need_more_data_for_len(void) {
       0,
   };
 
-  struct req_object o;
-  ssize_t n = parse_req_object(&o, make_array_const_slice(buffer));
-  assert(n == PARSE_MORE);
+  struct req_object obj;
+  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+  assert(n_parsed == PARSE_MORE);
 }
 
 static void test_parse_req_object_str_need_more_data_after_len(void) {
   uint8_t buffer[] = {SER_STR, 5, 0, 0, 0, 'a', 'b', 'c'};
 
-  struct req_object o;
-  ssize_t n = parse_req_object(&o, make_array_const_slice(buffer));
-  assert(n == PARSE_MORE);
+  struct req_object obj;
+  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+  assert(n_parsed == PARSE_MORE);
 }
 
 static void test_parse_req_object_invalid_type(void) {
   uint8_t buffer[18] = {245};
 
-  struct req_object o;
-  ssize_t n = parse_req_object(&o, make_array_const_slice(buffer));
-  assert(n == PARSE_ERR);
+  struct req_object obj;
+  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+  assert(n_parsed == PARSE_ERR);
 }
 
 static void test_parse_req_object_empty_buffer(void) {
-  struct req_object o;
-  ssize_t n = parse_req_object(&o, make_const_slice(NULL, 0));
-  assert(n == PARSE_MORE);
+  struct req_object obj;
+  ssize_t n_parsed = parse_req_object(&obj, make_const_slice(NULL, 0));
+  assert(n_parsed == PARSE_MORE);
 }
 
 static void test_write_nil_response(void) {
@@ -169,6 +172,8 @@ static void test_write_arr_response(void) {
       buffer_const_slice(&buffer), make_array_const_slice(expected));
   buffer_destroy(&buffer);
 }
+
+// NOLINTEND(readability-magic-numbers)
 
 void test_parser(void) {
   RUN_TEST(test_parse_req_type);

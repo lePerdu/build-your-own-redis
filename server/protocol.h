@@ -29,11 +29,11 @@ ssize_t parse_str_value(struct const_slice *str, struct const_slice buffer);
 
 // Helpers for serializing
 
-void write_obj_type(struct buffer *b, enum proto_type t);
-void write_nil_value(struct buffer *b);
-void write_int_value(struct buffer *b, int_val_t n);
-void write_str_value(struct buffer *b, struct const_slice str);
-void write_array_header(struct buffer *b, uint32_t n);
+void write_obj_type(struct buffer *out, enum proto_type type);
+void write_nil_value(struct buffer *out);
+void write_int_value(struct buffer *out, int_val_t n);
+void write_str_value(struct buffer *out, struct const_slice str);
+void write_array_header(struct buffer *out, uint32_t arr_size);
 
 enum req_type {
   REQ_GET = 0,
@@ -83,19 +83,19 @@ enum write_result {
   WRITE_ERR = -1,
 };
 
-void req_object_destroy(struct req_object *o);
-int print_req_object(FILE *stream, const struct req_object *o);
+void req_object_destroy(struct req_object *obj);
+int print_req_object(FILE *stream, const struct req_object *obj);
 
-ssize_t parse_req_type(enum req_type *t, struct const_slice buffer);
-ssize_t parse_req_object(struct req_object *o, struct const_slice buffer);
+ssize_t parse_req_type(enum req_type *type, struct const_slice buffer);
+ssize_t parse_req_object(struct req_object *obj, struct const_slice buffer);
 
-void write_response_header(struct buffer *b, enum res_type res_type);
+void write_response_header(struct buffer *out, enum res_type res_type);
 
 // Helpers for common response types
-void write_nil_response(struct buffer *b);
-void write_int_response(struct buffer *b, int_val_t n);
-void write_str_response(struct buffer *b, struct const_slice str);
-void write_arr_response_header(struct buffer *b, uint32_t size);
-void write_err_response(struct buffer *b, const char *msg);
+void write_nil_response(struct buffer *out);
+void write_int_response(struct buffer *out, int_val_t n);
+void write_str_response(struct buffer *out, struct const_slice str);
+void write_arr_response_header(struct buffer *out, uint32_t size);
+void write_err_response(struct buffer *out, const char *msg);
 
 #endif
