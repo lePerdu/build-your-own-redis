@@ -3,6 +3,9 @@ CFLAGS_OPT = -Og -g -fno-omit-frame-pointer -fsanitize=address
 
 CFLAGS ?= $(CFLAGS_BASE) $(CFLAGS_OPT)
 
+CLANG_FORMAT ?= clang-format
+CLANG_TIDY ?= clang-tidy
+
 BUILD = build
 BIN = bin
 
@@ -63,13 +66,13 @@ compile-commands:
 .PHONY: compile-commands
 
 check:
-	clang-tidy $(SERVER_SRC)/*
+	$(CLANG_TIDY) $(SERVER_SRC)/*
 
 format:
-	clang-format -i $(SERVER_SRC)/*
+	$(CLANG_FORMAT) -i $(SERVER_SRC)/*
 
 format-check:
-	clang-format --Werror --dry-run $(SERVER_SRC)/*
+	$(CLANG_FORMAT) --Werror --dry-run $(SERVER_SRC)/*
 
 .PHONY: check format format-check
 

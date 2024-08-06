@@ -4,16 +4,20 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Check formatting
         run: make format-check
+        env:
+          CLANG_FORMAT: clang-format-18
       - name: Check linting
         run: make check
+        env:
+          CLANG_TIDY: clang-tidy-18
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
