@@ -1,0 +1,14 @@
+Checks:
+  - bugprone-*
+  - clang-diagnostic-*
+  - clang-analyzer-*
+  - -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+  - misc-*
+  - modernize-*
+  - performance-*
+  - portability-*
+  - readability-*
+HeaderFileExtensions:
+  - h
+ImplementationFileExtensions:
+  - c
