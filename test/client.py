@@ -19,6 +19,8 @@ class ReqType(enum.IntEnum):
     HKEYS = 20
     HGETALL = 21
 
+    SHUTDOWN = 255
+
 
 class RespType(enum.IntEnum):
     OK = 0

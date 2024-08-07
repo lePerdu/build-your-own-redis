@@ -259,6 +259,14 @@ static void do_hgetall(
   hmap_iter(found, append_key_val_to_response, out_buf);
 }
 
+static void do_shutdown(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  (void)store;
+  (void)args;
+  (void)out_buf;
+  exit(EXIT_SUCCESS);
+}
+
 static const struct command all_commands[REQ_MAX_ID] = {
 #define CMD(name, arg_count, handler) [REQ_##name] = {#name, arg_count, handler}
     // clang-format off
@@ -273,6 +281,8 @@ static const struct command all_commands[REQ_MAX_ID] = {
   CMD(HLEN, 1, do_hlen),
   CMD(HGETALL, 1, do_hgetall),
   CMD(HKEYS, 1, do_hkeys),
+  CMD(SHUTDOWN, 0, do_shutdown),
+
 // clang-format on
 #undef CMD
 };
