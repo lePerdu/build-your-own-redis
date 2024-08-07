@@ -157,6 +157,13 @@ static void conn_init(struct conn *conn, int fildes) {
   offset_buf_init(&conn->write_buf, WRITE_BUF_INIT_CAP);
 }
 
+/** Free resources, but not the whole connection object since it can be re-used */
+static void conn_cleanup(struct conn *conn) {
+  conn->fd = -1;
+  offset_buf_destroy(&conn->read_buf);
+  offset_buf_destroy(&conn->write_buf);
+}
+
 static void server_state_setup(struct server_state *server) {
   server->socket_fd = setup_socket();
 
@@ -199,6 +206,7 @@ static struct conn *get_available_conn(struct server_state *server) {
 }
 
 static void free_conn(struct server_state *server, struct conn *conn) {
+  // TODO: Skip freeing buffers since they can be reused? Maybe only keep them if they are small/default size?
   if (conn->prev != NULL) {
     conn->prev->next = conn->next;
   } else {
@@ -211,6 +219,8 @@ static void free_conn(struct server_state *server, struct conn *conn) {
 
   conn->next = server->connection_pool;
   server->connection_pool = conn;
+
+  conn_cleanup(conn);
 }
 
 enum read_result {

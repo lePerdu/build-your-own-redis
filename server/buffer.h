@@ -77,6 +77,10 @@ static inline void offset_buf_init(struct offset_buf *buf, uint32_t init_cap) {
   buffer_init(&buf->buf, init_cap);
 }
 
+static inline void offset_buf_destroy(struct offset_buf *buf) {
+  buffer_destroy(&buf->buf);
+}
+
 /**
  * Position where data can be read from the buffer.
  */

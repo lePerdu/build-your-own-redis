@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
-from client import Client, ReqType, RespObject, RespType
+from client import Client, ProtocolError, ReqType, RespObject, RespType
 
 root_dir = Path(__file__).parent.parent
 run_command = (root_dir / "bin" / "server",)
@@ -68,11 +68,24 @@ class Server:
             text=True,
         )
 
-    def close(self):
+    def stop(self):
         if self.process is None:
             return
-        self.process.kill()
-        _ = self.process.wait()
+        if self.process.poll() is not None:
+            return
+
+        # Try to kill via client
+        c = self.make_client()
+        try:
+            _ = c.send(ReqType.SHUTDOWN)
+        except ProtocolError:
+            pass
+
+        try:
+            return self.process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            return self.process.wait()
 
     def make_client(self) -> Client:
         return Client(timeout=5)
@@ -87,10 +100,13 @@ class Server:
         _traceback: TracebackType | None,
     ):
         assert self.process is not None
-        self.close()
+        exit_code = self.stop()
 
         self.stdout_data = read_all_and_close(self.stdout_file)
         self.stderr_data = read_all_and_close(self.stderr_file)
+
+        if exit_code != 0:
+            raise Exception(f"Server didn't close gracefully: {exit_code}")
 
     def get_output(self) -> tuple[str, str]:
         if self.process is None:
