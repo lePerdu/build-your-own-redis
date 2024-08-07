@@ -4,7 +4,7 @@ import typing
 from pathlib import Path
 from types import TracebackType
 
-from client import Client, ProtocolError, ReqType
+from client import Client, ClientError
 
 root_dir = Path(__file__).parent.parent
 run_command = (root_dir / "bin" / "server",)
@@ -68,10 +68,10 @@ class Server:
             return
 
         # Try to kill via client
-        c = self.make_client()
         try:
-            _ = c.send(ReqType.SHUTDOWN)
-        except ProtocolError:
+            with self.make_client() as c:
+                c.send_shutdown()
+        except ClientError:
             pass
 
         try:

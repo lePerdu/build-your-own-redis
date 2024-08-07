@@ -238,6 +238,14 @@ class Client:
         self.send_req(request, *args)
         return self.recv_resp()
 
+    def send_shutdown(self):
+        """This needs some special handling since the server won't send a response."""
+        try:
+            val = self.send(ReqType.SHUTDOWN)
+        except UnexpectedEofError:
+            return
+        raise ProtocolError("Unexpected response from SHUTDOWN command", val)
+
     def close(self):
         self.conn.close()
 
