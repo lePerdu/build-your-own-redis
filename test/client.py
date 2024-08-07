@@ -19,6 +19,14 @@ class ReqType(enum.IntEnum):
     HKEYS = 20
     HGETALL = 21
 
+    SADD = 32
+    SISMEMBER = 33
+    SREM = 34
+    SCARD = 35
+    SRANDMEMBER = 36
+    SPOP = 37
+    SMEMBERS = 38
+
     SHUTDOWN = 255
 
 

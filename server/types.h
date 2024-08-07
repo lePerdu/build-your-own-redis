@@ -2,6 +2,7 @@
 #define TYPES_H_
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,6 +62,13 @@ static inline struct slice slice_dup(struct const_slice slice) {
   void *new_data = malloc(slice.size);
   memcpy(new_data, slice.data, slice.size);
   return make_slice(new_data, slice.size);
+}
+
+static inline bool slice_eq(
+    struct const_slice slice_a, struct const_slice slice_b) {
+  return (
+      slice_a.size == slice_b.size &&
+      memcmp(slice_a.data, slice_b.data, slice_a.size) == 0);
 }
 
 #endif

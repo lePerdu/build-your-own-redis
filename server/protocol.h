@@ -51,6 +51,14 @@ enum req_type {
   REQ_HKEYS = 20,
   REQ_HGETALL = 21,
 
+  REQ_SADD = 32,
+  REQ_SISMEMBER = 33,
+  REQ_SREM = 34,
+  REQ_SCARD = 35,
+  REQ_SRANDMEMBER = 36,
+  REQ_SPOP = 37,
+  REQ_SMEMBERS = 38,
+
   REQ_SHUTDOWN = 255,
 
   REQ_MAX_ID,

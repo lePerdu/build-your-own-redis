@@ -259,6 +259,200 @@ static void do_hgetall(
   hmap_iter(found, append_key_val_to_response, out_buf);
 }
 
+static void do_sadd(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  if (args[1].type != SER_STR) {
+    write_err_response(out_buf, "invalid set key");
+    return;
+  }
+  struct const_slice set_key = to_const_slice(args[1].str_val);
+
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    found = store_set(store, key, make_hset_object());
+  }
+
+  if (found->type != OBJ_HSET) {
+    write_err_response(out_buf, "object not a set");
+    return;
+  }
+
+  bool added = hset_add(found, set_key);
+  write_bool_response(out_buf, added);
+}
+
+static void do_sismember(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  if (args[1].type != SER_STR) {
+    write_err_response(out_buf, "invalid set key");
+    return;
+  }
+  struct const_slice set_key = to_const_slice(args[1].str_val);
+
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_bool_response(out_buf, false);
+    return;
+  }
+
+  if (found->type != OBJ_HSET) {
+    write_err_response(out_buf, "object not a set");
+    return;
+  }
+
+  bool contains = hset_contains(found, set_key);
+  write_bool_response(out_buf, contains);
+}
+
+static void do_srem(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  if (args[1].type != SER_STR) {
+    write_err_response(out_buf, "invalid set key");
+    return;
+  }
+  struct const_slice set_key = to_const_slice(args[1].str_val);
+
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_bool_response(out_buf, false);
+    return;
+  }
+
+  if (found->type != OBJ_HSET) {
+    write_err_response(out_buf, "object not a set");
+    return;
+  }
+
+  bool removed = hset_del(found, set_key);
+  write_bool_response(out_buf, removed);
+}
+
+static void do_scard(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_int_response(out_buf, 0);
+    return;
+  }
+
+  if (found->type != OBJ_HSET) {
+    write_err_response(out_buf, "object not a set");
+    return;
+  }
+
+  write_int_response(out_buf, hset_size(found));
+}
+
+static void do_srandmember(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_nil_response(out_buf);
+    return;
+  }
+
+  if (found->type != OBJ_HSET) {
+    write_err_response(out_buf, "object not a set");
+    return;
+  }
+
+  struct const_slice member;
+  bool found_member = hset_peek(found, &member);
+  if (found_member) {
+    write_str_response(out_buf, member);
+  } else {
+    write_nil_response(out_buf);
+  }
+}
+
+static void do_spop(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_nil_response(out_buf);
+    return;
+  }
+
+  if (found->type != OBJ_HSET) {
+    write_err_response(out_buf, "object not a set");
+    return;
+  }
+
+  struct slice member;
+  bool found_member = hset_pop(found, &member);
+  if (found_member) {
+    write_str_response(out_buf, to_const_slice(member));
+    free(member.data);
+  } else {
+    write_nil_response(out_buf);
+  }
+}
+
+static bool append_set_key_to_response(struct const_slice key, void *arg) {
+  struct buffer *out_buf = arg;
+  write_str_value(out_buf, key);
+  return true;
+}
+
+static void do_smembers(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_arr_response_header(out_buf, 0);
+    return;
+  }
+
+  if (found->type != OBJ_HSET) {
+    write_err_response(out_buf, "object not a set");
+    return;
+  }
+
+  write_arr_response_header(out_buf, hset_size(found));
+  hset_iter(found, append_set_key_to_response, out_buf);
+}
+
 static void do_shutdown(
     struct store *store, struct req_object *args, struct buffer *out_buf) {
   (void)store;
@@ -281,6 +475,15 @@ static const struct command all_commands[REQ_MAX_ID] = {
   CMD(HLEN, 1, do_hlen),
   CMD(HGETALL, 1, do_hgetall),
   CMD(HKEYS, 1, do_hkeys),
+
+  CMD(SADD, 2, do_sadd),
+  CMD(SISMEMBER, 2, do_sismember),
+  CMD(SREM, 2, do_srem),
+  CMD(SCARD, 1, do_scard),
+  CMD(SRANDMEMBER, 1, do_srandmember),
+  CMD(SPOP, 1, do_spop),
+  CMD(SMEMBERS, 1, do_smembers),
+
   CMD(SHUTDOWN, 0, do_shutdown),
 
 // clang-format on

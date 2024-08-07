@@ -109,6 +109,43 @@ struct hash_entry *hash_map_delete(
   return ht_detach(&map->table, location);
 }
 
+struct hash_entry *hash_map_peek(const struct hash_map *map) {
+  // Don't need to iterate in this case
+  if (hash_map_size(map) == 0) {
+    return NULL;
+  }
+
+  // TODO: Is there a way to optimize this for big, sparse tables?
+  for (uint32_t index = 0; index <= map->table.mask; index++) {
+    struct hash_entry *entry = map->table.data[index];
+    if (entry != NULL) {
+      return entry;
+    }
+  }
+
+  assert(false);
+}
+
+struct hash_entry *hash_map_pop(struct hash_map *map) {
+  // TODO: Share code with hash_map_peek
+
+  // Don't need to iterate in this case
+  if (hash_map_size(map) == 0) {
+    return NULL;
+  }
+
+  for (uint32_t index = 0; index <= map->table.mask; index++) {
+    struct hash_entry *entry = map->table.data[index];
+    if (entry != NULL) {
+      map->table.data[index] = entry->next;
+      map->table.size--;
+      return entry;
+    }
+  }
+
+  assert(false);
+}
+
 bool hash_map_iter(struct hash_map *map, hash_entry_iter_fn iter, void *arg) {
   for (uint32_t index = 0; index <= map->table.mask; index++) {
     struct hash_entry *entry = map->table.data[index];

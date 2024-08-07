@@ -13,6 +13,7 @@ enum obj_type {
   OBJ_INT,
   OBJ_STR,
   OBJ_HMAP,
+  OBJ_HSET,
 };
 
 struct object {
@@ -30,6 +31,7 @@ static inline bool object_is_scalar(enum obj_type type) {
     case OBJ_STR:
       return true;
     case OBJ_HMAP:
+    case OBJ_HSET:
       return false;
     default:
       assert(false);
@@ -45,6 +47,7 @@ static inline struct object make_int_object(int_val_t n) {
 }
 
 struct object make_hmap_object(void);
+struct object make_hset_object(void);
 
 /**
  * Destroys the object and all sub-objects.
@@ -61,5 +64,20 @@ int_val_t hmap_size(struct object *obj);
 typedef bool (*hmap_iter_fn)(
     struct const_slice key, struct object *val, void *arg);
 void hmap_iter(struct object *obj, hmap_iter_fn iter, void *arg);
+
+/** Returns `true` if the element was added, `false` if it already exists */
+bool hset_add(struct object *obj, struct const_slice key);
+bool hset_contains(struct object *obj, struct const_slice key);
+/** Returns `true` if the element was removed, `false` if did not exist */
+bool hset_del(struct object *obj, struct const_slice key);
+/** Returns `true` if the element was removed, `false` if empty */
+bool hset_pop(struct object *obj, struct slice *out);
+/** Returns `true` if the element was found, `false` if empty */
+bool hset_peek(struct object *obj, struct const_slice *out);
+
+int_val_t hset_size(struct object *obj);
+
+typedef bool (*hset_iter_fn)(struct const_slice key, void *arg);
+void hset_iter(struct object *obj, hset_iter_fn iter, void *arg);
 
 #endif

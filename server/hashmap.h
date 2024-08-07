@@ -47,6 +47,9 @@ struct hash_entry *hash_map_delete(
     struct hash_map *map, const struct hash_entry *key,
     hash_entry_cmp_fn compare);
 
+struct hash_entry *hash_map_peek(const struct hash_map *map);
+struct hash_entry *hash_map_pop(struct hash_map *map);
+
 typedef bool (*hash_entry_iter_fn)(struct hash_entry *entry, void *arg);
 bool hash_map_iter(struct hash_map *map, hash_entry_iter_fn iter, void *arg);
 
