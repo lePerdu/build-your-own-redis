@@ -64,7 +64,8 @@ enum req_type {
   REQ_MAX_ID,
 };
 
-static_assert(REQ_MAX_ID - 1 <= UINT8_MAX, "Too many requests to fit in 1 byte");
+static_assert(
+    REQ_MAX_ID - 1 <= UINT8_MAX, "Too many requests to fit in 1 byte");
 
 /**
  * Subset of `struct object` specialized for requests which only stores
