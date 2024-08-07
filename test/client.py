@@ -1,8 +1,9 @@
 import enum
+import itertools
 import math
 import socket
 import time
-from collections.abc import Buffer
+from collections.abc import Buffer, Iterator
 from types import TracebackType
 
 
@@ -227,3 +228,18 @@ class Client:
         _traceback: TracebackType | None,
     ):
         self.close()
+
+
+def resp_object_pairs(val: RespObject) -> Iterator[tuple[RespObject, RespObject]]:
+    assert isinstance(val, list)
+    for group in itertools.batched(val, 2):
+        assert len(group) == 2, "Expected list to be of even length"
+        yield (group[0], group[1])
+
+
+def resp_object_dict(val: RespObject) -> dict[RespObject, RespObject]:
+    mapping: dict[RespObject, RespObject] = {}
+    for k, v in resp_object_pairs(val):
+        assert k not in mapping, "Expected unique keys"
+        mapping[k] = v
+    return mapping
