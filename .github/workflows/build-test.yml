@@ -8,19 +8,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install BEAR tool
-        run: sudo apt-get install bear
       - name: Build compilation DB
-        run: make compile-commands
+        run: |
+          mkdir build
+          pushd build
+          cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=true ..
+          popd
+          ln -sv build/compile_commands.json .
 
       - name: Check formatting
-        run: make format-check
-        env:
-          CLANG_FORMAT: clang-format-18
+        run: clang-format-18 --dry-run --Werror server/*
       - name: Check linting
-        run: make check
-        env:
-          CLANG_TIDY: clang-tidy-18
+        run: clang-tidy-18 '--warnings-as-errors=*' server/*
 
   test:
     runs-on: ubuntu-24.04
@@ -31,8 +30,11 @@ jobs:
           python-version: '3.12'
 
       - name: Build
-        run: make all
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+          cmake --build .
+
       - name: Run unit tests
-        run: make unit-test
-      - name: Run E2E tests
-        run: make e2e-test
+        run: cmake --build build --target test
