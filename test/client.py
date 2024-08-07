@@ -51,7 +51,11 @@ RespObject = None | int | bytes | list["RespObject"]
 Response = tuple[RespType, RespObject]
 
 
-class ProtocolError(Exception):
+class ClientError(Exception):
+    pass
+
+
+class ProtocolError(ClientError):
     pass
 
 
@@ -63,7 +67,18 @@ class UnexpectedEofError(ProtocolError):
     pass
 
 
+class ResponseError(ClientError):
+    message: bytes
+
+    def __init__(self, message: bytes):
+        super().__init__(self)
+        self.message = message
+
+
 class NotEnoughData(Exception):
+    """Internal exception used to indicate more data is required.
+    This is not intended to be raised from top-level methods."""
+
     pass
 
 
@@ -185,18 +200,26 @@ class Client:
         print("sending", buffer)
         self.conn.sendall(buffer)
 
-    def recv_resp(self) -> Response:
+    def recv_resp(self) -> RespObject:
         """Receive a single response."""
         # TODO: Reduce the amount of copies
         while True:
             try:
-                resp, rest = try_parse_response(
+                (resp_code, resp_obj), rest = try_parse_response(
                     memoryview(self.recv_buf)[: self.recv_len]
                 )
                 # Reset the buffers after a good parse
                 self.recv_buf = bytearray(rest)
                 self.recv_len = len(self.recv_buf)
-                return resp
+                if resp_code == RespType.OK:
+                    return resp_obj
+                else:
+                    if isinstance(resp_obj, bytes):
+                        raise ResponseError(resp_obj)
+                    else:
+                        raise ProtocolError(
+                            f"Unexpected error message type: {type(resp_obj)}"
+                        )
             except NotEnoughData:
                 pass
 
@@ -210,7 +233,7 @@ class Client:
                 raise UnexpectedEofError
             self.recv_len += chunk_len
 
-    def send(self, request: ReqType, *args: ReqObject) -> Response:
+    def send(self, request: ReqType, *args: ReqObject) -> RespObject:
         """Send and receive a single response."""
         self.send_req(request, *args)
         return self.recv_resp()
