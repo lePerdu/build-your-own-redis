@@ -24,7 +24,7 @@ static void do_get(
   struct const_slice key = to_const_slice(args[0].str_val);
   struct object *found = store_get(store, key);
   if (found == NULL) {
-    write_err_response(out_buf, "not found");
+    write_nil_response(out_buf);
     return;
   }
 
@@ -74,12 +74,7 @@ static void do_del(
 
   struct const_slice key = to_const_slice(args[0].str_val);
   bool found = store_del(store, key);
-  if (!found) {
-    write_err_response(out_buf, "not found");
-    return;
-  }
-
-  write_nil_response(out_buf);
+  write_bool_response(out_buf, found);
 }
 
 static bool append_key_to_response(
@@ -112,7 +107,7 @@ static void do_hget(
 
   struct object *outer = store_get(store, to_const_slice(args[0].str_val));
   if (outer == NULL) {
-    write_err_response(out_buf, "not found");
+    write_nil_response(out_buf);
     return;
   }
 
@@ -123,7 +118,7 @@ static void do_hget(
 
   struct object *inner = hmap_get(outer, to_const_slice(args[1].str_val));
   if (inner == NULL) {
-    write_err_response(out_buf, "field not found");
+    write_nil_response(out_buf);
     return;
   }
 
@@ -175,7 +170,7 @@ static void do_hdel(
 
   struct object *outer = store_get(store, key);
   if (outer == NULL) {
-    write_err_response(out_buf, "not found");
+    write_bool_response(out_buf, false);
     return;
   }
 
@@ -184,11 +179,8 @@ static void do_hdel(
     return;
   }
 
-  if (hmap_del(outer, field)) {
-    write_nil_response(out_buf);
-  } else {
-    write_err_response(out_buf, "field not found");
-  }
+  bool deleted = hmap_del(outer, field);
+  write_bool_response(out_buf, deleted);
 }
 
 static void do_hlen(

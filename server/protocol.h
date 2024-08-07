@@ -17,9 +17,11 @@ typedef uint32_t proto_size_t;
 
 enum proto_type {
   SER_NIL = 0,
-  SER_INT = 1,
-  SER_STR = 2,
-  SER_ARR = 3,
+  SER_TRUE = 1,
+  SER_FALSE = 2,
+  SER_INT = 3,
+  SER_STR = 4,
+  SER_ARR = 5,
 };
 
 // Helpers for deserializing
@@ -31,6 +33,7 @@ ssize_t parse_str_value(struct const_slice *str, struct const_slice buffer);
 
 void write_obj_type(struct buffer *out, enum proto_type type);
 void write_nil_value(struct buffer *out);
+void write_bool_value(struct buffer *out, bool val);
 void write_int_value(struct buffer *out, int_val_t n);
 void write_str_value(struct buffer *out, struct const_slice str);
 void write_array_header(struct buffer *out, uint32_t arr_size);
@@ -93,6 +96,7 @@ void write_response_header(struct buffer *out, enum res_type res_type);
 
 // Helpers for common response types
 void write_nil_response(struct buffer *out);
+void write_bool_response(struct buffer *out, bool val);
 void write_int_response(struct buffer *out, int_val_t n);
 void write_str_response(struct buffer *out, struct const_slice str);
 void write_arr_response_header(struct buffer *out, uint32_t size);

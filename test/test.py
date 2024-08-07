@@ -125,8 +125,9 @@ def test_keys_empty_on_startup(server: Server):
 @test
 def test_get_not_exist_returns_error(server: Server):
     c = server.make_client()
-    res, _val = c.send(ReqType.GET, "abc")
-    assert res == RespType.ERR
+    res, val = c.send(ReqType.GET, "abc")
+    assert res == RespType.OK
+    assert val is None
 
 
 @test
@@ -152,19 +153,21 @@ def test_get_returns_last_set_value(server: Server):
 
 
 @test
-def test_del_returns_err_if_not_present(server: Server):
+def test_del_returns_false_if_not_present(server: Server):
     c = server.make_client()
-    res, _val = c.send(ReqType.DEL, "abc")
-    assert res == RespType.ERR
+    res, val = c.send(ReqType.DEL, "abc")
+    assert res == RespType.OK
+    assert val is False
 
 
 @test
-def test_del_returns_ok_if_present(server: Server):
+def test_del_returns_true_if_present(server: Server):
     c = server.make_client()
     res, _val = c.send(ReqType.SET, "abc", "def")
     assert res == RespType.OK
-    res, _val = c.send(ReqType.DEL, "abc")
+    res, val = c.send(ReqType.DEL, "abc")
     assert res == RespType.OK
+    assert val is True
 
 
 @test
@@ -174,8 +177,9 @@ def test_get_after_del_returns_err(server: Server):
     assert res == RespType.OK
     res, _val = c.send(ReqType.DEL, "abc")
     assert res == RespType.OK
-    res, _val = c.send(ReqType.GET, "abc")
-    assert res == RespType.ERR
+    res, val = c.send(ReqType.GET, "abc")
+    assert res == RespType.OK
+    assert val is None
 
 
 @test
@@ -254,8 +258,9 @@ def test_hget_returns_value_after_latest_hset(server: Server):
 @test
 def test_hget_missing_key(server: Server):
     c = server.make_client()
-    res, _val = c.send(ReqType.HGET, "map", "field")
-    assert res == RespType.ERR
+    res, val = c.send(ReqType.HGET, "map", "field")
+    assert res == RespType.OK
+    assert val is None
 
 
 @test
@@ -263,8 +268,9 @@ def test_hget_missing_field(server: Server):
     c = server.make_client()
     res, _val = c.send(ReqType.HSET, "map", "field1", "value")
     assert res == RespType.OK
-    res, _val = c.send(ReqType.HGET, "map", "field2")
-    assert res == RespType.ERR
+    res, val = c.send(ReqType.HGET, "map", "field2")
+    assert res == RespType.OK
+    assert val is None
 
 
 @test

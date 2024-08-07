@@ -27,9 +27,11 @@ class RespType(enum.IntEnum):
 
 class ObjType(enum.IntEnum):
     NIL = 0
-    INT = 1
-    STR = 2
-    ARR = 3
+    TRUE = 1
+    FALSE = 2
+    INT = 3
+    STR = 4
+    ARR = 5
 
 
 ReqObject = int | str | bytes
@@ -80,6 +82,10 @@ def try_parse_object(buffer: Buffer) -> tuple[RespObject, Buffer]:
     buffer = buffer[1:]
     if type_byte == ObjType.NIL:
         return None, buffer
+    elif type_byte == ObjType.TRUE:
+        return True, buffer
+    elif type_byte == ObjType.FALSE:
+        return False, buffer
     elif type_byte == ObjType.INT:
         if len(buffer) < 8:
             raise NotEnoughData

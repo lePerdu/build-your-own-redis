@@ -100,6 +100,10 @@ void write_obj_type(struct buffer *out, enum proto_type type) {
 
 void write_nil_value(struct buffer *out) { write_obj_type(out, SER_NIL); }
 
+void write_bool_value(struct buffer *out, bool val) {
+  write_obj_type(out, val ? SER_TRUE : SER_FALSE);
+}
+
 void write_int_value(struct buffer *out, int_val_t n) {
   write_obj_type(out, SER_INT);
   buffer_append(out, &n, INT_VAL_SIZE);
@@ -123,6 +127,11 @@ void write_response_header(struct buffer *out, enum res_type res_type) {
 void write_nil_response(struct buffer *out) {
   write_response_header(out, RES_OK);
   write_nil_value(out);
+}
+
+void write_bool_response(struct buffer *out, bool val) {
+  write_response_header(out, RES_OK);
+  write_bool_value(out, val);
 }
 
 void write_int_response(struct buffer *out, int_val_t n) {
