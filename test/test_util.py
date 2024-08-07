@@ -1,3 +1,4 @@
+import functools
 import subprocess
 import tempfile
 import typing
@@ -114,10 +115,24 @@ class Server:
 
 
 TestFn = typing.Callable[[Server], None]
+ClientTestFn = typing.Callable[[Client], None]
+
 all_tests: list[TestFn] = []
 
 
-def test(test_fn: TestFn) -> TestFn:
+def server_test(test_fn: TestFn) -> TestFn:
     """Annotation for marking tests."""
     all_tests.append(test_fn)
     return test_fn
+
+
+def client_test(test_fn: ClientTestFn) -> TestFn:
+    """Annotation for marking tests."""
+
+    @functools.wraps(test_fn)
+    def wrapper(server: Server):
+        with server.make_client() as client:
+            test_fn(client)
+
+    all_tests.append(wrapper)
+    return wrapper
