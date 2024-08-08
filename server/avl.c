@@ -32,11 +32,105 @@ static void update_node(struct avl_node *node) {
   }
 }
 
+static void update_parent_pointers(
+    struct avl_node *parent,
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+    struct avl_node *child, struct avl_node *new_child) {
+  if (parent->left == child) {
+    parent->left = new_child;
+  } else if (parent->right == child) {
+    parent->right = new_child;
+  } else {
+    assert(false);
+  }
+}
+
+static struct avl_node *avl_rot_left(struct avl_node *node) {
+  assert(node->right != NULL);
+  struct avl_node *parent = node->parent;
+  struct avl_node *new_top = node->right;
+
+  node->right = new_top->left;
+  if (node->right) {
+    node->right->parent = node;
+  }
+  node->parent = new_top;
+  update_node(node);
+
+  new_top->left = node;
+  new_top->parent = parent;
+  update_node(new_top);
+
+  return new_top;
+}
+
+static struct avl_node *avl_rot_right(struct avl_node *node) {
+  assert(node->left != NULL);
+  struct avl_node *parent = node->parent;
+  struct avl_node *new_top = node->left;
+
+  node->left = new_top->right;
+  if (node->left) {
+    node->left->parent = node;
+  }
+  node->parent = new_top;
+  update_node(node);
+
+  new_top->right = node;
+  new_top->parent = parent;
+  update_node(new_top);
+
+  return new_top;
+}
+
+static struct avl_node *avl_fix_left_deep(struct avl_node *node) {
+  assert(node->left != NULL);
+  if (avl_depth(node->left->left) < avl_depth(node->left->right)) {
+    node->left = avl_rot_left(node->left);
+    assert(avl_depth(node->left->left) >= avl_depth(node->left->right));
+  }
+
+  node = avl_rot_right(node);
+  assert(avl_depth(node->left) < avl_depth(node->right) + 2);
+  return node;
+}
+
+static struct avl_node *avl_fix_right_deep(struct avl_node *node) {
+  assert(node->right != NULL);
+  if (avl_depth(node->right->right) < avl_depth(node->right->left)) {
+    node->right = avl_rot_right(node->right);
+    assert(avl_depth(node->right->right) >= avl_depth(node->right->left));
+  }
+
+  node = avl_rot_left(node);
+  assert(avl_depth(node->right) < avl_depth(node->left) + 2);
+  return node;
+}
+
 static void fix_tree(struct avl_node **root, struct avl_node *node) {
-  (void)root;
   while (node != NULL) {
     update_node(node);
-    node = node->parent;
+    uint32_t l_depth = avl_depth(node->left);
+    uint32_t r_depth = avl_depth(node->right);
+
+    struct avl_node *parent = node->parent;
+    struct avl_node *new_child;
+    if (l_depth >= r_depth + 2) {
+      new_child = avl_fix_left_deep(node);
+    } else if (r_depth >= l_depth + 2) {
+      new_child = avl_fix_right_deep(node);
+    } else {
+      node = parent;
+      continue;
+    }
+
+    if (parent == NULL) {
+      *root = new_child;
+      return;
+    }
+
+    update_parent_pointers(parent, node, new_child);
+    node = parent;
   }
 }
 
@@ -76,48 +170,36 @@ struct avl_node *avl_search(
   return NULL;
 }
 
-static void update_parent_pointers(
-    struct avl_node *parent,
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    struct avl_node *child, struct avl_node *new_child) {
-  if (parent->left == child) {
-    parent->left = new_child;
-  } else if (parent->right == child) {
-    parent->right = new_child;
-  } else {
-    assert(false);
-  }
-}
-
 void avl_delete(struct avl_node **root, struct avl_node *node) {
-  struct avl_node *parent = node->parent;
-  struct avl_node *replacement;
   if (node->right == NULL) {
-    replacement = node->left;
-    if (replacement != NULL) {
-      replacement->parent = parent;
+    struct avl_node *parent = node->parent;
+    if (node->left != NULL) {
+      node->left->parent = parent;
     }
 
     if (parent != NULL) {
-      update_parent_pointers(parent, node, replacement);
+      update_parent_pointers(parent, node, node->left);
       fix_tree(root, parent);
     } else {
       assert(node == *root);
-      *root = replacement;
+      *root = node->left;
     }
   } else {
     // Replace deleted node with successor (left-most leaf of the right
     // sub-tree)
-    replacement = node->right;
+    struct avl_node *replacement = node->right;
     while (replacement->left != NULL) {
       replacement = replacement->left;
     }
     avl_delete(root, replacement);
 
+    // Get the parent here since the nested call could change the structure
+    struct avl_node *parent = node->parent;
+
     // Re-attach where `node` is
     replacement->left = node->left;
-    if (node->left != NULL) {
-      node->left->parent = replacement;
+    if (replacement->left != NULL) {
+      replacement->left->parent = replacement;
     }
     replacement->right = node->right;
     if (replacement->right != NULL) {

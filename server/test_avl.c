@@ -51,17 +51,20 @@ static void verify_tree(struct avl_node *node) {
   int self_val = test_val(node);
   if (node->left != NULL) {
     assert(node->left->parent == node);
-    assert(test_val(node->left) < self_val);
+    assert(test_val(node->left) <= self_val);
   }
   if (node->right != NULL) {
     assert(node->right->parent == node);
     assert(test_val(node->right) >= self_val);
   }
 
+  assert(avl_size(node) == 1 + avl_size(node->left) + avl_size(node->right));
+
   uint32_t l_depth = avl_depth(node->left);
   uint32_t r_depth = avl_depth(node->right);
   assert(avl_depth(node) == 1 + (l_depth >= r_depth ? l_depth : r_depth));
-  assert(avl_size(node) == 1 + avl_size(node->left) + avl_size(node->right));
+  assert(l_depth < r_depth + 2);
+  assert(r_depth < l_depth + 2);
 }
 
 static void cleanup_tree(struct avl_node *node) {
@@ -181,6 +184,6 @@ static void test_avl_small_trees(void) {
 }
 
 void test_avl(void) {
-  RUN_TEST(test_avl_small_trees);
   RUN_TEST(test_avl_random_insert_delete);
+  RUN_TEST(test_avl_small_trees);
 }
