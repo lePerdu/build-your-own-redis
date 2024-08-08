@@ -11,14 +11,14 @@ BIN = bin
 
 SERVER_SRC = server
 
-COMMON_SRCS = buffer.c commands.c hashmap.c object.c protocol.c store.c
+COMMON_SRCS = avl.c buffer.c commands.c hashmap.c object.c protocol.c store.c
 COMMON_OBJS = $(COMMON_SRCS:%.c=$(BUILD)/%.o)
 
 SERVER_SRCS = server.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(BUILD)/%.o)
 SERVER_EXEC = $(BIN)/server
 
-TEST_SRCS = test.c test_hashmap.c test_parser.c
+TEST_SRCS = test.c test_avl.c test_hashmap.c test_parser.c
 TEST_OBJS = $(TEST_SRCS:%.c=$(BUILD)/%.o)
 TEST_EXEC = $(BIN)/unit_test
 

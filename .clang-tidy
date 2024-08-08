@@ -4,6 +4,8 @@ Checks:
   - clang-analyzer-*
   - -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
   - misc-*
+  # Recursion is useful/needed for binary trees
+  - -misc-no-recursion
   - modernize-*
   - performance-*
   - portability-*
