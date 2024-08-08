@@ -57,6 +57,10 @@ static void verify_tree(struct avl_node *node) {
     assert(node->right->parent == node);
     assert(test_val(node->right) >= self_val);
   }
+
+  uint32_t l_depth = avl_depth(node->left);
+  uint32_t r_depth = avl_depth(node->right);
+  assert(avl_depth(node) == 1 + (l_depth >= r_depth ? l_depth : r_depth));
 }
 
 static void cleanup_tree(struct avl_node *node) {
@@ -95,8 +99,8 @@ static void test_avl_random_insert_delete(void) {
     if (to_remove != NULL) {
       delete_count++;
       avl_delete(&root, to_remove);
-      free(container_of(to_remove, struct test_node, node));
       verify_tree(root);
+      free(container_of(to_remove, struct test_node, node));
     }
   }
 
@@ -152,9 +156,8 @@ static void test_delete_all_values(int size) {
     struct avl_node *to_remove = avl_search(root, &key, compare_key);
     assert(to_remove != NULL);
     avl_delete(&root, to_remove);
-    free(container_of(to_remove, struct test_node, node));
-
     verify_tree(root);
+    free(container_of(to_remove, struct test_node, node));
     cleanup_tree(root);
   }
 }
@@ -177,6 +180,6 @@ static void test_avl_small_trees(void) {
 }
 
 void test_avl(void) {
-  RUN_TEST(test_avl_random_insert_delete);
   RUN_TEST(test_avl_small_trees);
+  RUN_TEST(test_avl_random_insert_delete);
 }
