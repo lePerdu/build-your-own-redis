@@ -8,7 +8,10 @@ struct avl_node {
   struct avl_node *parent;
   struct avl_node *left;
   struct avl_node *right;
+  /** Depth of the subtree starting from this node */
   uint32_t depth;
+  /** Size of the subtree starting from this node */
+  uint32_t size;
 };
 
 typedef int (*avl_compare_fn)(const struct avl_node *, const struct avl_node *);
@@ -19,6 +22,11 @@ void avl_init(struct avl_node *node);
 /** Null-safe depth getter */
 static inline uint32_t avl_depth(struct avl_node *node) {
   return node != NULL ? node->depth : 0;
+}
+
+/** Null-safe size getter */
+static inline uint32_t avl_size(struct avl_node *node) {
+  return node != NULL ? node->size : 0;
 }
 
 /** Insert, returning the new root node. */

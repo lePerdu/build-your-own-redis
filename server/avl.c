@@ -10,6 +10,7 @@ void avl_init(struct avl_node *node) {
   node->left = NULL;
   node->right = NULL;
   node->depth = 1;
+  node->size = 1;
 }
 
 static uint32_t u32_max(uint32_t val1, uint32_t val2) {
@@ -22,6 +23,7 @@ static uint32_t u32_max(uint32_t val1, uint32_t val2) {
  */
 static void update_node(struct avl_node *node) {
   node->depth = 1 + u32_max(avl_depth(node->left), avl_depth(node->right));
+  node->size = 1 + avl_size(node->left) + avl_size(node->right);
   if (node->left != NULL) {
     assert(node->left->parent == node);
   }

@@ -61,6 +61,7 @@ static void verify_tree(struct avl_node *node) {
   uint32_t l_depth = avl_depth(node->left);
   uint32_t r_depth = avl_depth(node->right);
   assert(avl_depth(node) == 1 + (l_depth >= r_depth ? l_depth : r_depth));
+  assert(avl_size(node) == 1 + avl_size(node->left) + avl_size(node->right));
 }
 
 static void cleanup_tree(struct avl_node *node) {
