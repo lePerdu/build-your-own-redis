@@ -21,6 +21,7 @@ static bool hset_entry_free_iter(struct hash_entry *raw_ent, void *arg);
 void object_destroy(struct object obj) {
   switch (obj.type) {
     case OBJ_INT:
+    case OBJ_FLOAT:
       break;
     case OBJ_STR:
       free(obj.str_val.data);
@@ -42,6 +43,8 @@ void write_object(struct buffer *out, struct object *obj) {
   switch (obj->type) {
     case OBJ_INT:
       return write_int_value(out, obj->int_val);
+    case OBJ_FLOAT:
+      return write_float_value(out, obj->float_val);
     case OBJ_STR:
       return write_str_value(out, to_const_slice(obj->str_val));
     default:

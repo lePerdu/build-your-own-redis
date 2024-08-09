@@ -1,5 +1,6 @@
 #include "protocol.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -11,6 +12,7 @@
 #include "types.h"
 
 #define INT_VAL_SIZE (sizeof(int_val_t))
+#define FLOAT_VAL_SIZE (sizeof(double))
 
 ssize_t parse_int_value(int_val_t *n, struct const_slice buffer) {
   if (buffer.size < INT_VAL_SIZE) {
@@ -18,6 +20,18 @@ ssize_t parse_int_value(int_val_t *n, struct const_slice buffer) {
   }
   memcpy(n, buffer.data, INT_VAL_SIZE);
   return INT_VAL_SIZE;
+}
+
+ssize_t parse_float_value(double *val, struct const_slice buffer) {
+  if (buffer.size < FLOAT_VAL_SIZE) {
+    return PARSE_MORE;
+  }
+  memcpy(val, buffer.data, FLOAT_VAL_SIZE);
+  // TODO Allow parsing nan?
+  if (isnan(*val)) {
+    return PARSE_ERR;
+  }
+  return FLOAT_VAL_SIZE;
 }
 
 ssize_t parse_str_value(struct const_slice *str, struct const_slice buffer) {
@@ -70,6 +84,9 @@ ssize_t parse_req_object(struct req_object *obj, struct const_slice buffer) {
     case SER_INT:
       val_size = parse_int_value(&obj->int_val, buffer);
       break;
+    case SER_FLOAT:
+      val_size = parse_float_value(&obj->float_val, buffer);
+      break;
     case SER_STR: {
       struct const_slice parsed;
       val_size = parse_str_value(&parsed, buffer);
@@ -109,6 +126,13 @@ void write_int_value(struct buffer *out, int_val_t n) {
   buffer_append(out, &n, INT_VAL_SIZE);
 }
 
+void write_float_value(struct buffer *out, double val) {
+  // TODO: Allow writing nan?
+  assert(!isnan(val));
+  write_obj_type(out, SER_FLOAT);
+  buffer_append(out, &val, sizeof(val));
+}
+
 void write_str_value(struct buffer *out, struct const_slice str) {
   write_obj_type(out, SER_STR);
   write_size(out, str.size);
@@ -139,6 +163,11 @@ void write_int_response(struct buffer *out, int_val_t n) {
   write_int_value(out, n);
 }
 
+void write_float_response(struct buffer *out, double val) {
+  write_response_header(out, RES_OK);
+  write_float_value(out, val);
+}
+
 void write_str_response(struct buffer *out, struct const_slice str) {
   write_response_header(out, RES_OK);
   write_str_value(out, str);
@@ -160,6 +189,8 @@ int print_req_object(FILE *stream, const struct req_object *obj) {
       return fprintf(stream, "<NIL>");
     case SER_INT:
       return fprintf(stream, "%ld", obj->int_val);
+    case SER_FLOAT:
+      return fprintf(stream, "%g", obj->float_val);
     case SER_STR:
       return fprintf(
           stream, "%.*s", (int)obj->str_val.size,

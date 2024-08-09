@@ -20,13 +20,15 @@ enum proto_type {
   SER_TRUE = 1,
   SER_FALSE = 2,
   SER_INT = 3,
-  SER_STR = 4,
-  SER_ARR = 5,
+  SER_FLOAT = 4,
+  SER_STR = 5,
+  SER_ARR = 6,
 };
 
 // Helpers for deserializing
 
 ssize_t parse_int_value(int_val_t *n, struct const_slice buffer);
+ssize_t parse_float_value(double *val, struct const_slice buffer);
 ssize_t parse_str_value(struct const_slice *str, struct const_slice buffer);
 
 // Helpers for serializing
@@ -35,6 +37,7 @@ void write_obj_type(struct buffer *out, enum proto_type type);
 void write_nil_value(struct buffer *out);
 void write_bool_value(struct buffer *out, bool val);
 void write_int_value(struct buffer *out, int_val_t n);
+void write_float_value(struct buffer *out, double val);
 void write_str_value(struct buffer *out, struct const_slice str);
 void write_array_header(struct buffer *out, uint32_t arr_size);
 
@@ -75,6 +78,7 @@ struct req_object {
   enum proto_type type;
   union {
     int_val_t int_val;
+    double float_val;
     /** Owned string value */
     struct slice str_val;
     // TODO: Support string refs when data is still around
@@ -109,6 +113,7 @@ void write_response_header(struct buffer *out, enum res_type res_type);
 void write_nil_response(struct buffer *out);
 void write_bool_response(struct buffer *out, bool val);
 void write_int_response(struct buffer *out, int_val_t n);
+void write_float_response(struct buffer *out, double val);
 void write_str_response(struct buffer *out, struct const_slice str);
 void write_arr_response_header(struct buffer *out, uint32_t size);
 void write_err_response(struct buffer *out, const char *msg);

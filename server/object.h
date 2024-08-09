@@ -11,6 +11,7 @@
 
 enum obj_type {
   OBJ_INT,
+  OBJ_FLOAT,
   OBJ_STR,
   OBJ_HMAP,
   OBJ_HSET,
@@ -20,6 +21,7 @@ struct object {
   enum obj_type type;
   union {
     int_val_t int_val;
+    double float_val;
     struct slice str_val;
     struct hash_map hmap_val;
   };
@@ -28,6 +30,7 @@ struct object {
 static inline bool object_is_scalar(enum obj_type type) {
   switch (type) {
     case OBJ_INT:
+    case OBJ_FLOAT:
     case OBJ_STR:
       return true;
     case OBJ_HMAP:
@@ -44,6 +47,10 @@ static inline struct object make_slice_object(struct slice slice) {
 
 static inline struct object make_int_object(int_val_t n) {
   return (struct object){.type = OBJ_INT, .int_val = n};
+}
+
+static inline struct object make_float_object(double val) {
+  return (struct object){.type = OBJ_FLOAT, .float_val = val};
 }
 
 struct object make_hmap_object(void);

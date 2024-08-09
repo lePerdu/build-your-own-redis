@@ -2,6 +2,7 @@ import enum
 import itertools
 import math
 import socket
+import struct
 import time
 from collections.abc import Buffer, Iterator
 from types import TracebackType
@@ -41,12 +42,13 @@ class ObjType(enum.IntEnum):
     TRUE = 1
     FALSE = 2
     INT = 3
-    STR = 4
-    ARR = 5
+    FLOAT = 4
+    STR = 5
+    ARR = 6
 
 
-ReqObject = int | str | bytes
-RespObject = None | int | bytes | list["RespObject"]
+ReqObject = int | float | str | bytes
+RespObject = None | int | float | bytes | list["RespObject"]
 
 Response = tuple[RespType, RespObject]
 
@@ -86,6 +88,9 @@ def extend_with_arg(buffer: bytearray, arg: ReqObject):
     if isinstance(arg, int):
         buffer.append(ObjType.INT)
         buffer.extend(arg.to_bytes(8, "little"))
+    elif isinstance(arg, float):
+        buffer.append(ObjType.FLOAT)
+        buffer.extend(struct.pack("d", arg))
     elif isinstance(arg, str):
         buffer.append(ObjType.STR)
         # TODO: Encode as UTF-8?
@@ -106,37 +111,43 @@ def try_parse_object(buffer: Buffer) -> tuple[RespObject, Buffer]:
 
     type_byte = buffer[0]
     buffer = buffer[1:]
-    if type_byte == ObjType.NIL:
-        return None, buffer
-    elif type_byte == ObjType.TRUE:
-        return True, buffer
-    elif type_byte == ObjType.FALSE:
-        return False, buffer
-    elif type_byte == ObjType.INT:
-        if len(buffer) < 8:
-            raise NotEnoughData
-        return int.from_bytes(buffer[:8], "little"), buffer[8:]
-    elif type_byte == ObjType.STR:
-        if len(buffer) < 4:
-            raise NotEnoughData
-        str_len = int.from_bytes(buffer[:4], "little")
-        buffer = buffer[4:]
-        if len(buffer) < str_len:
-            raise NotEnoughData
-        return bytes(buffer[:str_len]), buffer[str_len:]
-    elif type_byte == ObjType.ARR:
-        if len(buffer) < 4:
-            raise NotEnoughData
+    match type_byte:
+        case ObjType.NIL:
+            return None, buffer
+        case ObjType.TRUE:
+            return True, buffer
+        case ObjType.FALSE:
+            return False, buffer
+        case ObjType.INT:
+            if len(buffer) < 8:
+                raise NotEnoughData
+            return int.from_bytes(buffer[:8], "little"), buffer[8:]
+        case ObjType.FLOAT:
+            if len(buffer) < 8:
+                raise NotEnoughData
+            val: float = struct.unpack("d", buffer[:8])[0]
+            return val, buffer[8:]
+        case ObjType.STR:
+            if len(buffer) < 4:
+                raise NotEnoughData
+            str_len = int.from_bytes(buffer[:4], "little")
+            buffer = buffer[4:]
+            if len(buffer) < str_len:
+                raise NotEnoughData
+            return bytes(buffer[:str_len]), buffer[str_len:]
+        case ObjType.ARR:
+            if len(buffer) < 4:
+                raise NotEnoughData
 
-        arr_len = int.from_bytes(buffer[:4], "little")
-        buffer = buffer[4:]
-        arr: list[RespObject] = []
-        for _ in range(arr_len):
-            elem, buffer = try_parse_object(buffer)
-            arr.append(elem)
-        return arr, buffer
-    else:
-        raise ParseError(f"Invalid response type: f{type_byte}")
+            arr_len = int.from_bytes(buffer[:4], "little")
+            buffer = buffer[4:]
+            arr: list[RespObject] = []
+            for _ in range(arr_len):
+                elem, buffer = try_parse_object(buffer)
+                arr.append(elem)
+            return arr, buffer
+        case _:
+            raise ParseError(f"Invalid response type: f{type_byte}")
 
 
 def try_parse_response(buffer: Buffer) -> tuple[Response, Buffer]:
