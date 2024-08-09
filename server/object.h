@@ -15,6 +15,7 @@ enum obj_type {
   OBJ_STR,
   OBJ_HMAP,
   OBJ_HSET,
+  OBJ_ZSET,
 };
 
 struct object {
@@ -23,7 +24,12 @@ struct object {
     int_val_t int_val;
     double float_val;
     struct slice str_val;
-    struct hash_map hmap_val;
+
+    // These are both needed for ZSET
+    struct {
+      struct hash_map hmap_val;
+      struct avl_node *tree_val;
+    };
   };
 };
 
@@ -35,6 +41,7 @@ static inline bool object_is_scalar(enum obj_type type) {
       return true;
     case OBJ_HMAP:
     case OBJ_HSET:
+    case OBJ_ZSET:
       return false;
     default:
       assert(false);
@@ -55,6 +62,7 @@ static inline struct object make_float_object(double val) {
 
 struct object make_hmap_object(void);
 struct object make_hset_object(void);
+struct object make_zset_object(void);
 
 /**
  * Destroys the object and all sub-objects.
@@ -86,5 +94,10 @@ int_val_t hset_size(struct object *obj);
 
 typedef bool (*hset_iter_fn)(struct const_slice key, void *arg);
 void hset_iter(struct object *obj, hset_iter_fn iter, void *arg);
+
+uint32_t zset_size(struct object *obj);
+bool zset_score(struct object *obj, struct const_slice key, double *score);
+bool zset_add(struct object *obj, struct const_slice key, double score);
+bool zset_del(struct object *obj, struct const_slice key);
 
 #endif

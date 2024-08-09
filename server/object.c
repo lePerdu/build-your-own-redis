@@ -2,9 +2,11 @@
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "avl.h"
 #include "buffer.h"
 #include "hashmap.h"
 #include "protocol.h"
@@ -13,10 +15,12 @@
 enum {
   HMAP_INIT_CAP = 8,
   HSET_INIT_CAP = 8,
+  ZSET_INIT_CAP = 8,
 };
 
 static bool hmap_entry_free_iter(struct hash_entry *raw_ent, void *arg);
 static bool hset_entry_free_iter(struct hash_entry *raw_ent, void *arg);
+static bool zset_hash_entry_free_iter(struct hash_entry *raw_ent, void *arg);
 
 void object_destroy(struct object obj) {
   switch (obj.type) {
@@ -33,6 +37,12 @@ void object_destroy(struct object obj) {
     case OBJ_HSET:
       hash_map_iter(&obj.hmap_val, hset_entry_free_iter, NULL);
       hash_map_destroy(&obj.hmap_val);
+      break;
+    case OBJ_ZSET:
+      hash_map_iter(&obj.hmap_val, zset_hash_entry_free_iter, NULL);
+      hash_map_destroy(&obj.hmap_val);
+      // Don't need to destroy the AVL tree because it uses the same nodes as
+      // the hash table and doesn't have extra allocations
       break;
     default:
       assert(false);
@@ -317,4 +327,130 @@ void hset_iter(struct object *obj, hset_iter_fn iter, void *arg) {
   assert(obj->type == OBJ_HSET);
   struct hset_iter_ctx ctx = {.callback = iter, .arg = arg};
   hash_map_iter(&obj->hmap_val, hset_iter_wrapper, &ctx);
+}
+
+struct zset_node {
+  struct hash_entry hash_base;
+  struct avl_node avl_base;
+  struct slice key;
+  double score;
+};
+
+struct zset_key {
+  struct hash_entry base;
+  struct const_slice key;
+};
+
+static bool zset_node_eq(
+    const struct hash_entry *raw_key, const struct hash_entry *raw_ent) {
+  return slice_eq(
+      container_of(raw_key, struct zset_key, base)->key,
+      to_const_slice(container_of(raw_ent, struct zset_node, hash_base)->key));
+}
+
+static int zset_node_compare(
+    const struct avl_node *raw_a, const struct avl_node *raw_b) {
+  // TODO Also use the name
+  return container_of(raw_a, struct zset_node, avl_base)->score -
+         container_of(raw_b, struct zset_node, avl_base)->score;
+}
+
+static struct zset_node *zset_node_alloc(struct const_slice key, double score) {
+  struct zset_node *node = malloc(sizeof(*node));
+  assert(node != NULL);
+  node->hash_base.hash_code = slice_hash(key);
+  avl_init(&node->avl_base);
+  node->key = slice_dup(key);
+  node->score = score;
+  return node;
+}
+
+static void zset_node_free(struct zset_node *node) {
+  free(node->key.data);
+  free(node);
+}
+
+static bool zset_hash_entry_free_iter(struct hash_entry *raw_ent, void *arg) {
+  (void)arg;
+  zset_node_free(container_of(raw_ent, struct zset_node, hash_base));
+  return true;
+}
+
+struct object make_zset_object(void) {
+  struct object obj = {.type = OBJ_ZSET};
+  hash_map_init(&obj.hmap_val, ZSET_INIT_CAP);
+  obj.tree_val = NULL;
+  return obj;
+}
+
+uint32_t zset_size(struct object *obj) {
+  assert(obj->type == OBJ_ZSET);
+  uint32_t hash_size = hash_map_size(&obj->hmap_val);
+  uint32_t tree_size = avl_size(obj->tree_val);
+  assert(hash_size == tree_size);
+  return hash_size;
+}
+
+bool zset_score(struct object *obj, struct const_slice key, double *score) {
+  assert(obj->type == OBJ_ZSET);
+  struct zset_key hash_key = {
+      .base.hash_code = slice_hash(key),
+      .key = key,
+  };
+  struct hash_entry *found =
+      hash_map_get(&obj->hmap_val, &hash_key.base, zset_node_eq);
+  if (found == NULL) {
+    return false;
+  }
+
+  *score = container_of(found, struct zset_node, hash_base)->score;
+  return true;
+}
+
+bool zset_add(struct object *obj, struct const_slice key, double score) {
+  assert(obj->type == OBJ_ZSET);
+  struct hash_map *map = &obj->hmap_val;
+
+  struct zset_key key_ent = {
+      .base.hash_code = slice_hash(key),
+      .key = key,
+  };
+
+  struct hash_entry *found = hash_map_get(map, &key_ent.base, zset_node_eq);
+  if (found == NULL) {
+    struct zset_node *new = zset_node_alloc(key, score);
+    hash_map_insert(map, &new->hash_base);
+    avl_insert(&obj->tree_val, &new->avl_base, zset_node_compare);
+    return true;
+  }
+
+  // Delete and re-insert with the new score
+  struct zset_node *existing = container_of(found, struct zset_node, hash_base);
+  avl_delete(&obj->tree_val, &existing->avl_base);
+  existing->score = score;
+  avl_insert(&obj->tree_val, &existing->avl_base, zset_node_compare);
+  return false;
+}
+
+bool zset_del(struct object *obj, struct const_slice key) {
+  assert(obj->type == OBJ_ZSET);
+  struct hash_map *map = &obj->hmap_val;
+
+  struct zset_key key_ent = {
+      .base.hash_code = slice_hash(key),
+      .key = key,
+  };
+
+  struct hash_entry *removed =
+      hash_map_delete(map, &key_ent.base, zset_node_eq);
+  if (removed == NULL) {
+    return false;
+  }
+
+  // Delete and re-insert with the new score
+  struct zset_node *existing =
+      container_of(removed, struct zset_node, hash_base);
+  avl_delete(&obj->tree_val, &existing->avl_base);
+  zset_node_free(existing);
+  return true;
 }

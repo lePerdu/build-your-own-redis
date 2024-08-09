@@ -62,6 +62,11 @@ enum req_type {
   REQ_SPOP = 37,
   REQ_SMEMBERS = 38,
 
+  REQ_ZSCORE = 48,
+  REQ_ZADD = 49,
+  REQ_ZREM = 50,
+  REQ_ZCARD = 51,
+
   REQ_SHUTDOWN = 255,
 
   REQ_MAX_ID,

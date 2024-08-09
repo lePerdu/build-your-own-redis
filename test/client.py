@@ -29,6 +29,11 @@ class ReqType(enum.IntEnum):
     SPOP = 37
     SMEMBERS = 38
 
+    ZSCORE = 48
+    ZADD = 49
+    ZREM = 50
+    ZCARD = 51
+
     SHUTDOWN = 255
 
 

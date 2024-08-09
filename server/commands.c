@@ -269,7 +269,7 @@ static void do_sadd(
   struct const_slice key = to_const_slice(args[0].str_val);
 
   if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid set key");
+    write_err_response(out_buf, "invalid member");
     return;
   }
   struct const_slice set_key = to_const_slice(args[1].str_val);
@@ -297,7 +297,7 @@ static void do_sismember(
   struct const_slice key = to_const_slice(args[0].str_val);
 
   if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid set key");
+    write_err_response(out_buf, "invalid member");
     return;
   }
   struct const_slice set_key = to_const_slice(args[1].str_val);
@@ -326,7 +326,7 @@ static void do_srem(
   struct const_slice key = to_const_slice(args[0].str_val);
 
   if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid set key");
+    write_err_response(out_buf, "invalid member");
     return;
   }
   struct const_slice set_key = to_const_slice(args[1].str_val);
@@ -454,6 +454,124 @@ static void do_smembers(
   hset_iter(found, append_set_key_to_response, out_buf);
 }
 
+static void do_zscore(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+
+  if (args[1].type != SER_STR) {
+    write_err_response(out_buf, "invalid member");
+    return;
+  }
+
+  struct object *outer = store_get(store, to_const_slice(args[0].str_val));
+  if (outer == NULL) {
+    write_nil_response(out_buf);
+    return;
+  }
+
+  if (outer->type != OBJ_ZSET) {
+    write_err_response(out_buf, "object not a sorted set");
+    return;
+  }
+
+  double score;
+  bool found = zset_score(outer, to_const_slice(args[1].str_val), &score);
+  if (found) {
+    write_float_response(out_buf, score);
+  } else {
+    write_nil_response(out_buf);
+  }
+}
+
+static void do_zadd(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  if (args[1].type != SER_FLOAT) {
+    write_err_response(out_buf, "invalid score");
+    return;
+  }
+  double score = args[1].float_val;
+
+  if (args[2].type != SER_STR) {
+    write_err_response(out_buf, "invalid member");
+    return;
+  }
+  struct const_slice member = to_const_slice(args[2].str_val);
+
+  struct object *outer = store_get(store, key);
+  if (outer == NULL) {
+    // Create new set
+    outer = store_set(store, key, make_zset_object());
+  }
+
+  if (outer->type != OBJ_ZSET) {
+    write_err_response(out_buf, "object not a sorted set");
+    return;
+  }
+
+  bool added = zset_add(outer, member, score);
+  write_bool_response(out_buf, added);
+}
+
+static void do_zrem(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  if (args[1].type != SER_STR) {
+    write_err_response(out_buf, "invalid member");
+    return;
+  }
+  struct const_slice member = to_const_slice(args[1].str_val);
+
+  struct object *outer = store_get(store, key);
+  if (outer == NULL) {
+    write_bool_response(out_buf, false);
+    return;
+  }
+
+  if (outer->type != OBJ_ZSET) {
+    write_err_response(out_buf, "object not a sorted set");
+    return;
+  }
+
+  bool deleted = zset_del(outer, member);
+  write_bool_response(out_buf, deleted);
+}
+
+static void do_zcard(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_int_response(out_buf, 0);
+    return;
+  }
+
+  if (found->type != OBJ_ZSET) {
+    write_err_response(out_buf, "object not a sorted set");
+    return;
+  }
+
+  write_int_response(out_buf, zset_size(found));
+}
+
 static void do_shutdown(
     struct store *store, struct req_object *args, struct buffer *out_buf) {
   (void)store;
@@ -484,6 +602,11 @@ static const struct command all_commands[REQ_MAX_ID] = {
   CMD(SRANDMEMBER, 1, do_srandmember),
   CMD(SPOP, 1, do_spop),
   CMD(SMEMBERS, 1, do_smembers),
+
+  CMD(ZSCORE, 2, do_zscore),
+  CMD(ZADD, 3, do_zadd),
+  CMD(ZREM, 2, do_zrem),
+  CMD(ZCARD, 1, do_zcard),
 
   CMD(SHUTDOWN, 0, do_shutdown),
 

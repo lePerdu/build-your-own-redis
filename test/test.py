@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import test_basic
 import test_hash
 import test_set
+import test_sorted_set
 from test_util import Server, all_tests
 
 

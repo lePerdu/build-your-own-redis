@@ -1,5 +1,6 @@
 #include "protocol.h"
 
+#include <assert.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>

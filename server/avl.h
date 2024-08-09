@@ -1,8 +1,8 @@
 #ifndef AVL_H_
 #define AVL_H_
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 struct avl_node {
   struct avl_node *parent;
