@@ -350,9 +350,34 @@ static bool zset_node_eq(
 
 static int zset_node_compare(
     const struct avl_node *raw_a, const struct avl_node *raw_b) {
-  // TODO Also use the name
-  return container_of(raw_a, struct zset_node, avl_base)->score -
-         container_of(raw_b, struct zset_node, avl_base)->score;
+  const struct zset_node *node_a =
+      container_of(raw_a, struct zset_node, avl_base);
+  const struct zset_node *node_b =
+      container_of(raw_b, struct zset_node, avl_base);
+  double cmp_score = node_a->score - node_b->score;
+  if (cmp_score < 0.0) {
+    return -1;
+  }
+  if (cmp_score > 0.0) {
+    return 1;
+  }
+
+  size_t size_a = node_a->key.size;
+  size_t size_b = node_b->key.size;
+  size_t min_size = size_a <= size_b ? size_a : size_b;
+  int cmp_prefix = memcmp(node_a->key.data, node_b->key.data, min_size);
+  if (cmp_prefix != 0) {
+    return cmp_prefix;
+  }
+
+  // Subtraction could overflow, so do this to be on the safe side
+  if (size_a < size_b) {
+    return -1;
+  }
+  if (size_a > size_b) {
+    return 1;
+  }
+  return 0;
 }
 
 static struct zset_node *zset_node_alloc(struct const_slice key, double score) {
