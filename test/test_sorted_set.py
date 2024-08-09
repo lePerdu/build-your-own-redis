@@ -72,6 +72,63 @@ def test_zcard_decreases_after_zrem(c: Client):
 
 
 @client_test
+def test_zrank_nil_if_set_not_created(c: Client):
+    val = c.send(ReqType.ZRANK, "missing", "key")
+    assert val is None
+
+
+@client_test
+def test_zrank_nil_if_member_missing(c: Client):
+    _ = c.send(ReqType.ZADD, "scores", 5.2, "key")
+    val = c.send(ReqType.ZRANK, "scores", "otherkey")
+    assert val is None
+
+
+@client_test
+def test_zrank_ordered_by_score(c: Client):
+    _ = c.send(ReqType.ZADD, "scores", 9.2, "pigs")
+    _ = c.send(ReqType.ZADD, "scores", 1.6, "farmers")
+    _ = c.send(ReqType.ZADD, "scores", 2.3, "cows")
+
+    val = c.send(ReqType.ZRANK, "scores", "farmers")
+    assert val == 0
+    val = c.send(ReqType.ZRANK, "scores", "cows")
+    assert val == 1
+    val = c.send(ReqType.ZRANK, "scores", "pigs")
+    assert val == 2
+
+
+@client_test
+def test_zrank_ordered_by_name_if_score_eq(c: Client):
+    _ = c.send(ReqType.ZADD, "scores", 1.6, "pigs")
+    _ = c.send(ReqType.ZADD, "scores", 1.6, "farmers")
+    _ = c.send(ReqType.ZADD, "scores", 2.3, "cows")
+
+    val = c.send(ReqType.ZRANK, "scores", "farmers")
+    assert val == 0
+    val = c.send(ReqType.ZRANK, "scores", "pigs")
+    assert val == 1
+    val = c.send(ReqType.ZRANK, "scores", "cows")
+    assert val == 2
+
+
+@client_test
+def test_zrank_ordered_by_most_recent_score(c: Client):
+    _ = c.send(ReqType.ZADD, "scores", 9.2, "pigs")
+    _ = c.send(ReqType.ZADD, "scores", 1.6, "farmers")
+    _ = c.send(ReqType.ZADD, "scores", 2.3, "cows")
+
+    _ = c.send(ReqType.ZADD, "scores", 8.1, "farmers")
+
+    val = c.send(ReqType.ZRANK, "scores", "cows")
+    assert val == 0
+    val = c.send(ReqType.ZRANK, "scores", "farmers")
+    assert val == 1
+    val = c.send(ReqType.ZRANK, "scores", "pigs")
+    assert val == 2
+
+
+@client_test
 def test_zadd_and_zscore_10_000_keys(c: Client):
     n = 10_000
 

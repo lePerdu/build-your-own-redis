@@ -99,5 +99,6 @@ uint32_t zset_size(struct object *obj);
 bool zset_score(struct object *obj, struct const_slice key, double *score);
 bool zset_add(struct object *obj, struct const_slice key, double score);
 bool zset_del(struct object *obj, struct const_slice key);
+int_val_t zset_rank(struct object *obj, struct const_slice key);
 
 #endif

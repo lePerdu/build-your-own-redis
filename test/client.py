@@ -33,6 +33,7 @@ class ReqType(enum.IntEnum):
     ZADD = 49
     ZREM = 50
     ZCARD = 51
+    ZRANK = 52
 
     SHUTDOWN = 255
 

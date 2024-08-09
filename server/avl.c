@@ -219,3 +219,23 @@ void avl_delete(struct avl_node **root, struct avl_node *node) {
     }
   }
 }
+
+uint32_t avl_rank(const struct avl_node *root, const struct avl_node *target) {
+  uint32_t rank = avl_size(target->left);
+  // Walk up the tree summing up the left branch sizes
+  while (target != root) {
+    const struct avl_node *parent = target->parent;
+    assert(parent != NULL);
+    if (parent->right == target) {
+      rank += avl_size(parent->left) + 1;
+    } else {
+      assert(parent->left == target);
+      // If the current node is a left branch, there are no more nodes less than
+      // it, so rank doesn't change
+    }
+
+    target = parent;
+  }
+
+  return rank;
+}

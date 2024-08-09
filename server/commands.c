@@ -572,6 +572,39 @@ static void do_zcard(
   write_int_response(out_buf, zset_size(found));
 }
 
+static void do_zrank(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  if (args[1].type != SER_STR) {
+    write_err_response(out_buf, "invalid member");
+    return;
+  }
+  struct const_slice member = to_const_slice(args[1].str_val);
+
+  struct object *outer = store_get(store, key);
+  if (outer == NULL) {
+    write_nil_response(out_buf);
+    return;
+  }
+
+  if (outer->type != OBJ_ZSET) {
+    write_err_response(out_buf, "object not a sorted set");
+    return;
+  }
+
+  int_val_t rank = zset_rank(outer, member);
+  if (rank < 0) {
+    write_nil_response(out_buf);
+  } else {
+    write_int_response(out_buf, rank);
+  }
+}
+
 static void do_shutdown(
     struct store *store, struct req_object *args, struct buffer *out_buf) {
   (void)store;
@@ -607,6 +640,7 @@ static const struct command all_commands[REQ_MAX_ID] = {
   CMD(ZADD, 3, do_zadd),
   CMD(ZREM, 2, do_zrem),
   CMD(ZCARD, 1, do_zcard),
+  CMD(ZRANK, 2, do_zrank),
 
   CMD(SHUTDOWN, 0, do_shutdown),
 

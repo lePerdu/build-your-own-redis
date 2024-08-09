@@ -166,6 +166,18 @@ static void test_delete_all_values(int size) {
   }
 }
 
+static void test_rank_all_values(int size) {
+  for (int val = 1; val <= size; val++) {
+    struct avl_node *root = generate_tree(size);
+    struct test_key key = {val};
+    struct avl_node *found = avl_search(root, &key, compare_key);
+    assert(found != NULL);
+    uint32_t rank = avl_rank(root, found);
+    assert(rank == (uint32_t)val - 1);
+    cleanup_tree(root);
+  }
+}
+
 enum {
   AVL_TEST_SMALL_TREE_SIZE = 20,
   AVL_TEST_SMALL_TREE_REPEAT = 5,
@@ -179,6 +191,7 @@ static void test_avl_small_trees(void) {
     for (int j = 0; j < AVL_TEST_SMALL_TREE_REPEAT; j++) {
       test_insert_all_values(i);
       test_delete_all_values(i);
+      test_rank_all_values(i);
     }
   }
 }

@@ -479,3 +479,22 @@ bool zset_del(struct object *obj, struct const_slice key) {
   zset_node_free(existing);
   return true;
 }
+
+int_val_t zset_rank(struct object *obj, struct const_slice key) {
+  assert(obj->type == OBJ_ZSET);
+  struct hash_map *map = &obj->hmap_val;
+
+  struct zset_key key_ent = {
+      .base.hash_code = slice_hash(key),
+      .key = key,
+  };
+
+  struct hash_entry *found_raw = hash_map_get(map, &key_ent.base, zset_node_eq);
+  if (found_raw == NULL) {
+    return -1;
+  }
+
+  struct zset_node *found =
+      container_of(found_raw, struct zset_node, hash_base);
+  return avl_rank(obj->tree_val, &found->avl_base);
+}

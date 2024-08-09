@@ -37,4 +37,6 @@ void avl_delete(struct avl_node **root, struct avl_node *node);
 struct avl_node *avl_search(
     struct avl_node *root, const void *key, avl_compare_key_fn compare);
 
+uint32_t avl_rank(const struct avl_node *root, const struct avl_node *target);
+
 #endif
