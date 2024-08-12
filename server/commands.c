@@ -1,6 +1,7 @@
 #include "commands.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -605,6 +606,72 @@ static void do_zrank(
   }
 }
 
+static void do_zquery(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  if (args[1].type != SER_FLOAT) {
+    write_err_response(out_buf, "invalid score");
+    return;
+  }
+  double score = args[1].float_val;
+
+  if (args[2].type != SER_STR) {
+    write_err_response(out_buf, "invalid member");
+    return;
+  }
+  struct const_slice member = to_const_slice(args[2].str_val);
+
+  if (args[3].type != SER_INT) {
+    write_err_response(out_buf, "invalid offset");
+    return;
+  }
+  int64_t offset = args[3].int_val;
+
+  if (args[4].type != SER_INT || args[4].int_val < 0) {
+    write_err_response(out_buf, "invalid limit");
+    return;
+  }
+  uint64_t limit = args[4].int_val;
+
+  struct object *outer = store_get(store, key);
+  if (outer == NULL) {
+    write_arr_response_header(out_buf, 0);
+    return;
+  }
+
+  if (outer->type != OBJ_ZSET) {
+    write_err_response(out_buf, "object not a sorted set");
+    return;
+  }
+
+  struct zset_node *start = zset_query(outer, member, score);
+  start = zset_node_offset(start, offset);
+
+  if (start == NULL) {
+    write_arr_response_header(out_buf, 0);
+    return;
+  }
+
+  // The protocol doesn't handle unknown-length arrays, so we have to figure out
+  // the count ahead of time
+  uint32_t max_count = zset_size(outer) - zset_node_rank(outer, start);
+  uint32_t count = limit < max_count ? limit : max_count;
+
+  write_arr_response_header(out_buf, count * 2);
+  for (uint32_t i = 0; i < count; i++) {
+    assert(start != NULL);
+    write_str_value(out_buf, zset_node_key(start));
+    write_float_value(out_buf, zset_node_score(start));
+
+    start = zset_node_offset(start, 1);
+  }
+}
+
 static void do_shutdown(
     struct store *store, struct req_object *args, struct buffer *out_buf) {
   (void)store;
@@ -614,7 +681,8 @@ static void do_shutdown(
 }
 
 static const struct command all_commands[REQ_MAX_ID] = {
-#define CMD(name, arg_count, handler) [REQ_##name] = {#name, arg_count, handler}
+#define CMD(name, arg_count, handler) \
+  [REQ_##name] = {#name, (arg_count), (handler)}
     // clang-format off
   CMD(GET, 1, do_get),
   CMD(SET, 2, do_set),
@@ -641,6 +709,7 @@ static const struct command all_commands[REQ_MAX_ID] = {
   CMD(ZREM, 2, do_zrem),
   CMD(ZCARD, 1, do_zcard),
   CMD(ZRANK, 2, do_zrank),
+  CMD(ZQUERY, 5, do_zquery),
 
   CMD(SHUTDOWN, 0, do_shutdown),
 

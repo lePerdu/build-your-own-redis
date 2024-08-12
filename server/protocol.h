@@ -67,6 +67,7 @@ enum req_type {
   REQ_ZREM = 50,
   REQ_ZCARD = 51,
   REQ_ZRANK = 52,
+  REQ_ZQUERY = 53,
 
   REQ_SHUTDOWN = 255,
 

@@ -1,4 +1,6 @@
-from client import Client, ReqType, ResponseError, resp_object_dict
+import itertools
+
+from client import Client, ReqType, ResponseError, resp_object_dict, resp_object_pairs
 from test_util import client_test
 
 
@@ -126,6 +128,105 @@ def test_zrank_ordered_by_most_recent_score(c: Client):
     assert val == 1
     val = c.send(ReqType.ZRANK, "scores", "pigs")
     assert val == 2
+
+
+def create_numbers_set(c: Client, key: str, n: int):
+    for i in range(n):
+        _ = c.send_req(ReqType.ZADD, key, float(i), str(i))
+
+    for _ in range(n):
+        _ = c.recv_resp()
+
+
+@client_test
+def test_zquery_all_ordered_by_score(c: Client):
+    create_numbers_set(c, "numbers", 10)
+
+    items = c.send(ReqType.ZQUERY, "numbers", 0.0, "", 0, 100)
+    print(items)
+    assert items == [
+        b"0",
+        0.0,
+        b"1",
+        1.0,
+        b"2",
+        2.0,
+        b"3",
+        3.0,
+        b"4",
+        4.0,
+        b"5",
+        5.0,
+        b"6",
+        6.0,
+        b"7",
+        7.0,
+        b"8",
+        8.0,
+        b"9",
+        9.0,
+    ]
+
+
+@client_test
+def test_zquery_with_limit_from_start(c: Client):
+    create_numbers_set(c, "numbers", 10)
+
+    items = c.send(ReqType.ZQUERY, "numbers", 0.0, "", 0, 3)
+    print(items)
+    assert items == [b"0", 0.0, b"1", 1.0, b"2", 2.0]
+
+
+@client_test
+def test_zquery_with_offset_to_end(c: Client):
+    create_numbers_set(c, "numbers", 10)
+
+    items = c.send(ReqType.ZQUERY, "numbers", 0.0, "", 5, 100)
+    print(items)
+    assert items == [
+        b"5",
+        5.0,
+        b"6",
+        6.0,
+        b"7",
+        7.0,
+        b"8",
+        8.0,
+        b"9",
+        9.0,
+    ]
+
+
+@client_test
+def test_zquery_with_limit_and_offset_in_middle(c: Client):
+    create_numbers_set(c, "numbers", 10)
+
+    items = c.send(ReqType.ZQUERY, "numbers", 0.0, "", 5, 3)
+    print(items)
+    assert items == [
+        b"5",
+        5.0,
+        b"6",
+        6.0,
+        b"7",
+        7.0,
+    ]
+
+
+@client_test
+def test_zquery_with_score_from_middle(c: Client):
+    create_numbers_set(c, "numbers", 10)
+
+    items = c.send(ReqType.ZQUERY, "numbers", 4.2, "", 1, 3)
+    print(items)
+    assert items == [
+        b"6",
+        6.0,
+        b"7",
+        7.0,
+        b"8",
+        8.0,
+    ]
 
 
 @client_test

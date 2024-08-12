@@ -96,9 +96,25 @@ typedef bool (*hset_iter_fn)(struct const_slice key, void *arg);
 void hset_iter(struct object *obj, hset_iter_fn iter, void *arg);
 
 uint32_t zset_size(struct object *obj);
+
+/** Get score by name */
 bool zset_score(struct object *obj, struct const_slice key, double *score);
+/** Get rank by name */
+int64_t zset_rank(struct object *obj, struct const_slice key);
+/** Get node <= the target by name and score */
+struct zset_node *zset_query(
+    struct object *obj, struct const_slice key, double score);
+
+struct const_slice zset_node_key(const struct zset_node *node);
+double zset_node_score(const struct zset_node *node);
+uint32_t zset_node_rank(struct object *obj, struct zset_node *node);
+struct zset_node *zset_node_offset(struct zset_node *node, int64_t offset);
+/** Delete by node reference (from zset_query) */
+/*void zset_node_delete(struct object *obj, struct zset_node *node);*/
+
+/** Add or update score */
 bool zset_add(struct object *obj, struct const_slice key, double score);
+/** Delete by name */
 bool zset_del(struct object *obj, struct const_slice key);
-int_val_t zset_rank(struct object *obj, struct const_slice key);
 
 #endif

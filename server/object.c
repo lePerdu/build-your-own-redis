@@ -336,16 +336,56 @@ struct zset_node {
   double score;
 };
 
-struct zset_key {
+struct zset_hash_key {
   struct hash_entry base;
   struct const_slice key;
 };
 
+struct zset_tree_key {
+  struct const_slice key;
+  double score;
+};
+
+struct const_slice zset_node_key(const struct zset_node *node) {
+  return to_const_slice(node->key);
+}
+
+double zset_node_score(const struct zset_node *node) { return node->score; }
+
 static bool zset_node_eq(
     const struct hash_entry *raw_key, const struct hash_entry *raw_ent) {
   return slice_eq(
-      container_of(raw_key, struct zset_key, base)->key,
+      container_of(raw_key, struct zset_hash_key, base)->key,
       to_const_slice(container_of(raw_ent, struct zset_node, hash_base)->key));
+}
+
+static int zset_compare_helper(
+    struct const_slice key1, double score1, struct const_slice key2,
+    double score2) {
+  double cmp_score = score1 - score2;
+  if (cmp_score < 0.0) {
+    return -1;
+  }
+  if (cmp_score > 0.0) {
+    return 1;
+  }
+
+  size_t size1 = key1.size;
+  size_t size2 = key2.size;
+  size_t min_size = size1 <= size2 ? size1 : size2;
+  int cmp_prefix = memcmp(key1.data, key2.data, min_size);
+  if (cmp_prefix != 0) {
+    return cmp_prefix;
+  }
+
+  // Subtraction could overflow, so do this to be on the safe side
+  if (size1 < size2) {
+    return -1;
+  }
+  if (size1 > size2) {
+    return 1;
+  }
+  return 0;
 }
 
 static int zset_node_compare(
@@ -354,30 +394,18 @@ static int zset_node_compare(
       container_of(raw_a, struct zset_node, avl_base);
   const struct zset_node *node_b =
       container_of(raw_b, struct zset_node, avl_base);
-  double cmp_score = node_a->score - node_b->score;
-  if (cmp_score < 0.0) {
-    return -1;
-  }
-  if (cmp_score > 0.0) {
-    return 1;
-  }
+  return zset_compare_helper(
+      zset_node_key(node_a), node_a->score, zset_node_key(node_b),
+      node_b->score);
+}
 
-  size_t size_a = node_a->key.size;
-  size_t size_b = node_b->key.size;
-  size_t min_size = size_a <= size_b ? size_a : size_b;
-  int cmp_prefix = memcmp(node_a->key.data, node_b->key.data, min_size);
-  if (cmp_prefix != 0) {
-    return cmp_prefix;
-  }
-
-  // Subtraction could overflow, so do this to be on the safe side
-  if (size_a < size_b) {
-    return -1;
-  }
-  if (size_a > size_b) {
-    return 1;
-  }
-  return 0;
+static int zset_key_compare(
+    const void *raw_key, const struct avl_node *raw_node) {
+  const struct zset_tree_key *key = raw_key;
+  const struct zset_node *node =
+      container_of(raw_node, struct zset_node, avl_base);
+  return zset_compare_helper(
+      key->key, key->score, zset_node_key(node), node->score);
 }
 
 static struct zset_node *zset_node_alloc(struct const_slice key, double score) {
@@ -418,7 +446,7 @@ uint32_t zset_size(struct object *obj) {
 
 bool zset_score(struct object *obj, struct const_slice key, double *score) {
   assert(obj->type == OBJ_ZSET);
-  struct zset_key hash_key = {
+  struct zset_hash_key hash_key = {
       .base.hash_code = slice_hash(key),
       .key = key,
   };
@@ -436,7 +464,7 @@ bool zset_add(struct object *obj, struct const_slice key, double score) {
   assert(obj->type == OBJ_ZSET);
   struct hash_map *map = &obj->hmap_val;
 
-  struct zset_key key_ent = {
+  struct zset_hash_key key_ent = {
       .base.hash_code = slice_hash(key),
       .key = key,
   };
@@ -457,11 +485,18 @@ bool zset_add(struct object *obj, struct const_slice key, double score) {
   return false;
 }
 
+/*void zset_node_delete(struct object *obj, struct zset_node *node) {*/
+/*  assert(obj->type == OBJ_ZSET);*/
+/*  hash_map_detach_entry(&obj->hmap_val, &node->hash_base);*/
+/*  avl_delete(&obj->tree_val, &node->avl_base);*/
+/*  zset_node_free(node);*/
+/*}*/
+
 bool zset_del(struct object *obj, struct const_slice key) {
   assert(obj->type == OBJ_ZSET);
   struct hash_map *map = &obj->hmap_val;
 
-  struct zset_key key_ent = {
+  struct zset_hash_key key_ent = {
       .base.hash_code = slice_hash(key),
       .key = key,
   };
@@ -480,11 +515,11 @@ bool zset_del(struct object *obj, struct const_slice key) {
   return true;
 }
 
-int_val_t zset_rank(struct object *obj, struct const_slice key) {
+int64_t zset_rank(struct object *obj, struct const_slice key) {
   assert(obj->type == OBJ_ZSET);
   struct hash_map *map = &obj->hmap_val;
 
-  struct zset_key key_ent = {
+  struct zset_hash_key key_ent = {
       .base.hash_code = slice_hash(key),
       .key = key,
   };
@@ -497,4 +532,39 @@ int_val_t zset_rank(struct object *obj, struct const_slice key) {
   struct zset_node *found =
       container_of(found_raw, struct zset_node, hash_base);
   return avl_rank(obj->tree_val, &found->avl_base);
+}
+
+struct zset_node *zset_query(
+    struct object *obj, struct const_slice key, double score) {
+  assert(obj->type == OBJ_ZSET);
+  struct zset_tree_key key_ent = {
+      .key = key,
+      .score = score,
+  };
+
+  struct avl_node *found =
+      avl_search_lte(obj->tree_val, &key_ent, zset_key_compare);
+  if (found == NULL) {
+    return NULL;
+  }
+
+  return container_of(found, struct zset_node, avl_base);
+}
+
+uint32_t zset_node_rank(struct object *obj, struct zset_node *node) {
+  assert(obj->type == OBJ_ZSET);
+  return avl_rank(obj->tree_val, &node->avl_base);
+}
+
+struct zset_node *zset_node_offset(struct zset_node *node, int64_t offset) {
+  if (node == NULL) {
+    return NULL;
+  }
+
+  struct avl_node *target = avl_offset(&node->avl_base, offset);
+  if (target == NULL) {
+    return NULL;
+  }
+
+  return container_of(target, struct zset_node, avl_base);
 }

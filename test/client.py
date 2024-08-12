@@ -34,6 +34,7 @@ class ReqType(enum.IntEnum):
     ZREM = 50
     ZCARD = 51
     ZRANK = 52
+    ZQUERY = 53
 
     SHUTDOWN = 255
 

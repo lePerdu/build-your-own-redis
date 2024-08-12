@@ -8,7 +8,7 @@
 #include "protocol.h"
 #include "store.h"
 
-#define COMMAND_ARGS_MAX 3
+#define COMMAND_ARGS_MAX 5
 
 typedef void (*command_handler)(
     struct store *store, struct req_object *args, struct buffer *res_buf);
