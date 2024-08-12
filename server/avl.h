@@ -46,6 +46,9 @@ struct avl_node *avl_search_lte(
 struct avl_node *avl_search(
     struct avl_node *root, const void *key, avl_compare_key_fn compare);
 
+/** Find the node `offset` ranks from a target node. */
+struct avl_node *avl_offset(struct avl_node *node, int64_t offset);
+
 uint32_t avl_rank(const struct avl_node *root, const struct avl_node *target);
 
 #endif

@@ -232,6 +232,38 @@ void avl_delete(struct avl_node **root, struct avl_node *node) {
   }
 }
 
+struct avl_node *avl_offset(struct avl_node *node, int64_t offset) {
+  while (offset != 0) {
+    if (offset < 0 && avl_size(node->left) >= -offset) {
+      // This has to be the case since the size is >= offset > 0
+      assert(node->left != NULL);
+
+      node = node->left;
+      offset += avl_size(node->right) + 1;
+    } else if (offset > 0 && avl_size(node->right) >= offset) {
+      // This has to be the case since the size is >= offset > 0
+      assert(node->right != NULL);
+
+      node = node->right;
+      offset -= avl_size(node->left) + 1;
+    } else {
+      struct avl_node *parent = node->parent;
+      if (parent == NULL) {
+        return NULL;
+      }
+      if (node == parent->left) {
+        offset -= avl_size(node->right) + 1;
+      } else if (node == parent->right) {
+        offset += avl_size(node->left) + 1;
+      } else {
+        assert(false);
+      }
+      node = parent;
+    }
+  }
+  return node;
+}
+
 uint32_t avl_rank(const struct avl_node *root, const struct avl_node *target) {
   uint32_t rank = avl_size(target->left);
   // Walk up the tree summing up the left branch sizes

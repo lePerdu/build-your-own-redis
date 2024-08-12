@@ -228,6 +228,29 @@ static void test_rank_all_values(int size) {
   }
 }
 
+// NOLINTNEXTLINE: readability-function-cognitive-complexity
+static void test_avl_offset_from_all_nodes_to_all_nodes(int size) {
+  for (int val = 1; val <= size; val++) {
+    for (int offset = -val; offset <= size - val + 1; offset++) {
+      struct avl_node *root = generate_tree(size);
+      struct test_key key = {val};
+      struct avl_node *found = avl_search(root, &key, compare_key);
+      assert(found != NULL);
+      struct avl_node *target = avl_offset(found, offset);
+      if (val + offset <= 0) {
+        assert(target == NULL);
+      } else if (val + offset > size) {
+        assert(target == NULL);
+      } else {
+        assert(target != NULL);
+        assert(test_val(target) == val + offset);
+      }
+
+      cleanup_tree(root);
+    }
+  }
+}
+
 enum {
   AVL_TEST_SMALL_TREE_SIZE = 20,
   AVL_TEST_SMALL_TREE_REPEAT = 5,
@@ -244,6 +267,7 @@ static void test_avl_small_trees(void) {
       test_search_lte_exact_match_all_values(i);
       test_search_lte_no_exact_match_all_values(i);
       test_rank_all_values(i);
+      test_avl_offset_from_all_nodes_to_all_nodes(i);
     }
   }
 }
