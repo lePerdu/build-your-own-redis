@@ -21,6 +21,10 @@ struct const_slice {
   const void *data;
 };
 
+/** Macro used for intrusive data types */
+#define container_of(ptr, type, member) \
+  ((type *)((void *)(ptr) - offsetof(type, member)))
+
 static inline struct slice make_slice(void *data, size_t size) {
   return (struct slice){.size = size, .data = data};
 }

@@ -4,8 +4,8 @@
 #include <stdlib.h>
 
 #include "avl.h"
-#include "hashmap.h"
 #include "test.h"
+#include "types.h"
 
 struct test_node {
   struct avl_node node;

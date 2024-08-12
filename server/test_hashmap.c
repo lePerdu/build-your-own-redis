@@ -4,6 +4,7 @@
 
 #include "hashmap.h"
 #include "test.h"
+#include "types.h"
 
 // NOLINTBEGIN(readability-magic-numbers)
 

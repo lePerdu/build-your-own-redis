@@ -7,9 +7,6 @@
 
 #include "types.h"
 
-#define container_of(ptr, type, member) \
-  ((type *)((void *)(ptr) - offsetof(type, member)))
-
 typedef uint32_t hash_t;
 
 struct hash_entry {

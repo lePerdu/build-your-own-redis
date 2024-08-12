@@ -1,4 +1,4 @@
-CFLAGS_BASE = -std=c17 -Wall -Wextra
+CFLAGS_BASE = -std=c17 -Wall -Wextra -D_XOPEN_SOURCE=600
 CFLAGS_OPT = -Og -g -fno-omit-frame-pointer -fsanitize=address
 
 CFLAGS ?= $(CFLAGS_BASE) $(CFLAGS_OPT)
