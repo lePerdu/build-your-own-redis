@@ -34,6 +34,15 @@ void avl_insert(
     struct avl_node **root, struct avl_node *new, avl_compare_fn compare);
 /** Delete the existing node, returning the new root node. */
 void avl_delete(struct avl_node **root, struct avl_node *node);
+/**
+ * Find the right-most element less-than or equal to the key.
+ *
+ * If there are elements equal to the one returned, the left-most one will be
+ * returned.
+ */
+struct avl_node *avl_search_lte(
+    struct avl_node *root, const void *key, avl_compare_key_fn compare);
+/** Find the left-most element equal to the key */
 struct avl_node *avl_search(
     struct avl_node *root, const void *key, avl_compare_key_fn compare);
 

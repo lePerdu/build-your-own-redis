@@ -153,21 +153,33 @@ void avl_insert(
   fix_tree(root, new);
 }
 
-struct avl_node *avl_search(
+struct avl_node *avl_search_lte(
     struct avl_node *root, const void *key, avl_compare_key_fn compare) {
   struct avl_node *node = root;
+  struct avl_node *found = NULL;
   while (node != NULL) {
     int cmp = compare(key, node);
-    if (cmp < 0) {
+    if (cmp <= 0) {
+      // Found a candidate
+      // Don't return immediately if equal, since there could be multiple equal
+      // entries and we want to return the left-most
+      found = node;
       node = node->left;
     } else if (cmp > 0) {
       node = node->right;
-    } else {
-      return node;
     }
   }
 
-  return NULL;
+  return found;
+}
+
+struct avl_node *avl_search(
+    struct avl_node *root, const void *key, avl_compare_key_fn compare) {
+  struct avl_node *found = avl_search_lte(root, key, compare);
+  if (compare(key, found) != 0) {
+    return NULL;
+  }
+  return found;
 }
 
 void avl_delete(struct avl_node **root, struct avl_node *node) {

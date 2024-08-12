@@ -143,6 +143,19 @@ static struct avl_node *generate_tree(int size) {
   return root;
 }
 
+static struct avl_node *generate_odd_tree(int size) {
+  struct avl_node *root = NULL;
+
+  int seq[size];
+  generate_seq(size, seq);
+  for (int i = 0; i < size; i++) {
+    avl_insert(&root, &test_node_alloc(seq[i] * 2 - 1)->node, compare);
+    verify_tree(root);
+  }
+
+  return root;
+}
+
 static void test_insert_all_values(int size) {
   for (int val = 0; val <= size + 1; val++) {
     struct avl_node *root = generate_tree(size);
@@ -164,6 +177,43 @@ static void test_delete_all_values(int size) {
     free(container_of(to_remove, struct test_node, node));
     cleanup_tree(root);
   }
+}
+
+static void test_search_lte_exact_match_all_values(int size) {
+  // Generate the tree with odd values to search between nodes
+  for (int val = 1; val <= size; val++) {
+    struct avl_node *root = generate_tree(size);
+
+    struct test_key key = {val};
+    struct avl_node *found = avl_search_lte(root, &key, compare_key);
+    assert(found != NULL);
+    assert(test_val(found) == val);
+
+    cleanup_tree(root);
+  }
+}
+
+static void test_search_lte_no_exact_match_all_values(int size) {
+  // Generate the tree with odd values to search between nodes
+  for (int val = 0; val < size * 2; val += 2) {
+    struct avl_node *root = generate_odd_tree(size);
+
+    struct test_key key = {val};
+    struct avl_node *found = avl_search_lte(root, &key, compare_key);
+    assert(found != NULL);
+    assert(test_val(found) == val + 1);
+
+    cleanup_tree(root);
+  }
+
+  // Edge case at the end
+  struct avl_node *root = generate_odd_tree(size);
+
+  struct test_key key = {size * 2};
+  struct avl_node *found = avl_search_lte(root, &key, compare_key);
+  assert(found == NULL);
+
+  cleanup_tree(root);
 }
 
 static void test_rank_all_values(int size) {
@@ -191,6 +241,8 @@ static void test_avl_small_trees(void) {
     for (int j = 0; j < AVL_TEST_SMALL_TREE_REPEAT; j++) {
       test_insert_all_values(i);
       test_delete_all_values(i);
+      test_search_lte_exact_match_all_values(i);
+      test_search_lte_no_exact_match_all_values(i);
       test_rank_all_values(i);
     }
   }
