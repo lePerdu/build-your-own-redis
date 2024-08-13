@@ -46,6 +46,9 @@ enum req_type {
   REQ_SET = 1,
   REQ_DEL = 2,
   REQ_KEYS = 3,
+  REQ_TTL = 4,
+  REQ_EXPIRE = 5,
+  REQ_PERSIST = 6,
 
   REQ_HGET = 16,
   REQ_HSET = 17,

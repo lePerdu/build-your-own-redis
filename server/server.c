@@ -11,7 +11,6 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "buffer.h"
@@ -19,12 +18,6 @@
 #include "protocol.h"
 #include "store.h"
 #include "types.h"
-
-enum {
-  USEC_PER_SEC = 1000000,
-  USEC_PER_MSEC = 1000,
-  NSEC_PER_USEC = 1000,
-};
 
 enum {
   PORT = 1234,
@@ -159,16 +152,6 @@ static int setup_socket(void) {
   }
 
   return socket_fd;
-}
-
-static uint64_t get_monotonic_usec(void) {
-  struct timespec time;
-  // CLOCK_MONOTONIC isn't detected properly by clang-tidy for some reason
-  // NOLINTNEXTLINE: misc-include-cleaner
-  int res = clock_gettime(CLOCK_MONOTONIC, &time);
-  assert(res == 0);
-
-  return time.tv_sec * USEC_PER_SEC + time.tv_nsec / NSEC_PER_USEC;
 }
 
 static void dlist_init(struct dlist *list) { list->prev = list->next = list; }

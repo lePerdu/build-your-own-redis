@@ -4,15 +4,18 @@
 #include <stdint.h>
 
 #include "hashmap.h"
+#include "heap.h"
 #include "object.h"
 #include "types.h"
 
 struct store {
   struct hash_map map;
+  struct heap expires;
 };
 
 struct store_entry {
   struct hash_entry entry;
+  struct heap_ref ttl_ref;
 
   // Owned
   struct slice key;
@@ -20,7 +23,6 @@ struct store_entry {
   struct object val;
 };
 
-// Same memory layout, but with different const modifiers
 struct store_key {
   struct hash_entry entry;
   struct const_slice key;
@@ -40,5 +42,10 @@ bool store_del(struct store *store, struct const_slice key);
 typedef bool (*store_iter_fn)(
     struct const_slice key, struct object *val, void *arg);
 void store_iter(struct store *store, store_iter_fn iter, void *arg);
+
+int64_t store_object_get_expire(
+    const struct store *store, const struct object *obj);
+void store_object_set_expire(
+    struct store *store, struct object *obj, int64_t timestamp_ms);
 
 #endif

@@ -1,9 +1,11 @@
 #include "commands.h"
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #include "buffer.h"
 #include "object.h"
@@ -14,6 +16,16 @@
 static void write_object_response(struct buffer *out, struct object *obj) {
   write_response_header(out, RES_OK);
   write_object(out, obj);
+}
+
+uint64_t get_monotonic_usec(void) {
+  struct timespec time;
+  // CLOCK_MONOTONIC isn't detected properly by clang-tidy for some reason
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  int res = clock_gettime(CLOCK_MONOTONIC, &time);
+  assert(res == 0);
+
+  return time.tv_sec * USEC_PER_SEC + time.tv_nsec / NSEC_PER_USEC;
 }
 
 static void do_get(
@@ -93,6 +105,82 @@ static void do_keys(
   write_arr_response_header(out_buf, store_size(store));
 
   store_iter(store, append_key_to_response, out_buf);
+}
+
+static void do_ttl(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+
+  struct const_slice key = to_const_slice(args[0].str_val);
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_int_response(out_buf, -2);
+    return;
+  }
+
+  int64_t expires_at_us = store_object_get_expire(store, found);
+  if (expires_at_us < 0) {
+    write_int_response(out_buf, -1);
+    return;
+  }
+
+  uint64_t now = get_monotonic_usec();
+  uint64_t ttl =
+      (uint64_t)expires_at_us > now ? (expires_at_us - now) / USEC_PER_MSEC : 0;
+  write_int_response(out_buf, (int_val_t)ttl);
+}
+
+static void do_expire(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+
+  if (args[1].type != SER_INT) {
+    write_err_response(out_buf, "invalid ttl");
+    return;
+  }
+  int_val_t ttl_ms = args[1].int_val;
+
+  struct const_slice key = to_const_slice(args[0].str_val);
+
+  if (ttl_ms <= 0) {
+    bool removed = store_del(store, key);
+    write_bool_response(out_buf, removed);
+    return;
+  }
+
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_bool_response(out_buf, false);
+    return;
+  }
+
+  uint64_t expires_at_us = get_monotonic_usec() + ttl_ms * USEC_PER_MSEC;
+  store_object_set_expire(store, found, (int64_t)expires_at_us);
+  write_bool_response(out_buf, true);
+}
+
+static void do_persist(
+    struct store *store, struct req_object *args, struct buffer *out_buf) {
+  if (args[0].type != SER_STR) {
+    write_err_response(out_buf, "invalid key");
+    return;
+  }
+
+  struct const_slice key = to_const_slice(args[0].str_val);
+  struct object *found = store_get(store, key);
+  if (found == NULL) {
+    write_bool_response(out_buf, false);
+    return;
+  }
+
+  store_object_set_expire(store, found, -1);
+  write_bool_response(out_buf, true);
 }
 
 static void do_hget(
@@ -688,6 +776,10 @@ static const struct command all_commands[REQ_MAX_ID] = {
   CMD(SET, 2, do_set),
   CMD(DEL, 1, do_del),
   CMD(KEYS, 0, do_keys),
+
+  CMD(TTL, 1, do_ttl),
+  CMD(EXPIRE, 2, do_expire),
+  CMD(PERSIST, 1, do_persist),
 
   CMD(HGET, 2, do_hget),
   CMD(HSET, 3, do_hset),

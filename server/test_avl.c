@@ -228,7 +228,7 @@ static void test_rank_all_values(int size) {
   }
 }
 
-// NOLINTNEXTLINE: readability-function-cognitive-complexity
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_avl_offset_from_all_nodes_to_all_nodes(int size) {
   for (int val = 1; val <= size; val++) {
     for (int offset = -val; offset <= size - val + 1; offset++) {

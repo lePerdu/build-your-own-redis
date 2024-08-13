@@ -13,6 +13,9 @@ class ReqType(enum.IntEnum):
     SET = 1
     DEL = 2
     KEYS = 3
+    TTL = 4
+    EXPIRE = 5
+    PERSIST = 6
 
     HGET = 16
     HSET = 17
@@ -94,7 +97,7 @@ class NotEnoughData(Exception):
 def extend_with_arg(buffer: bytearray, arg: ReqObject):
     if isinstance(arg, int):
         buffer.append(ObjType.INT)
-        buffer.extend(arg.to_bytes(8, "little"))
+        buffer.extend(arg.to_bytes(8, "little", signed=True))
     elif isinstance(arg, float):
         buffer.append(ObjType.FLOAT)
         buffer.extend(struct.pack("d", arg))
@@ -128,7 +131,7 @@ def try_parse_object(buffer: Buffer) -> tuple[RespObject, Buffer]:
         case ObjType.INT:
             if len(buffer) < 8:
                 raise NotEnoughData
-            return int.from_bytes(buffer[:8], "little"), buffer[8:]
+            return int.from_bytes(buffer[:8], "little", signed=True), buffer[8:]
         case ObjType.FLOAT:
             if len(buffer) < 8:
                 raise NotEnoughData

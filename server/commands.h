@@ -24,4 +24,12 @@ const struct command *lookup_command(enum req_type type);
 void print_request(
     FILE *stream, const struct command *cmd, const struct req_object *args);
 
+enum {
+  USEC_PER_SEC = 1000000,
+  USEC_PER_MSEC = 1000,
+  NSEC_PER_USEC = 1000,
+};
+
+uint64_t get_monotonic_usec(void);
+
 #endif

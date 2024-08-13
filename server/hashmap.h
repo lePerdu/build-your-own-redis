@@ -26,7 +26,7 @@ struct hash_map {
 };
 
 typedef bool (*hash_entry_cmp_fn)(
-    const struct hash_entry *, const struct hash_entry *);
+    const struct hash_entry *key, const struct hash_entry *entry);
 
 void hash_map_init(struct hash_map *map, uint32_t cap);
 // Entries must be freed beforehand with hash_map_iter
