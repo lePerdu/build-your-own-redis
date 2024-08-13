@@ -15,6 +15,7 @@
 
 #include "buffer.h"
 #include "commands.h"
+#include "deque.h"
 #include "heap.h"
 #include "protocol.h"
 #include "store.h"
@@ -49,11 +50,6 @@ struct req_parser {
   int parsed_args;
 };
 
-struct dlist {
-  struct dlist *prev;
-  struct dlist *next;
-};
-
 struct conn {
   // Linked list pointers for managing connection pool
   struct conn *prev;
@@ -62,7 +58,7 @@ struct conn {
   int fd;
   enum conn_state state;
   uint64_t idle_start_us;
-  struct dlist timeout_node;
+  struct deque_node timeout_node;
 
   struct offset_buf read_buf;
   struct req_parser req_parser;
@@ -81,7 +77,7 @@ struct server_state {
   // active connection objects
   struct conn *active_connections;
 
-  struct dlist idle_timeouts;
+  struct deque idle_timeouts;
 };
 
 [[noreturn]] static void die_errno(const char *msg) {
@@ -155,24 +151,6 @@ static int setup_socket(void) {
   return socket_fd;
 }
 
-static void dlist_init(struct dlist *list) { list->prev = list->next = list; }
-
-static bool dlist_empty(struct dlist *list) { return list->next == list; }
-
-static void dlist_detach(struct dlist *node) {
-  node->next->prev = node->prev;
-  node->prev->next = node->next;
-}
-
-static void dlist_insert_before(struct dlist *node, struct dlist *new) {
-  struct dlist *prev = node->prev;
-  prev->next = new;
-  new->prev = prev;
-
-  new->next = node;
-  node->prev = new;
-}
-
 static void req_parser_init(struct req_parser *parser) {
   parser->cmd = NULL;
   parser->parsed_args = 0;
@@ -220,11 +198,12 @@ static void server_state_setup(struct server_state *server) {
   server->connection_pool = NULL;
   server->active_connections = NULL;
 
-  dlist_init(&server->idle_timeouts);
+  deque_init(&server->idle_timeouts);
 }
 
 static int get_next_delay_ms(struct server_state *server) {
-  if (dlist_empty(&server->idle_timeouts)) {
+  struct deque_node *timeout_node = deque_peek_front(&server->idle_timeouts);
+  if (timeout_node == NULL) {
     // Forever if there are no timeouts
     return -1;
   }
@@ -233,7 +212,7 @@ static int get_next_delay_ms(struct server_state *server) {
 
   // Idle timeouts
   struct conn *next_timeout_conn =
-      container_of(server->idle_timeouts.next, struct conn, timeout_node);
+      container_of(timeout_node, struct conn, timeout_node);
   uint64_t next_timeout_us = next_timeout_conn->idle_start_us + CONN_TIMEOUT_US;
   if (next_timeout_us < now_us) {
     return 0;
@@ -288,7 +267,7 @@ static void free_conn(struct server_state *server, struct conn *conn) {
   conn->next = server->connection_pool;
   server->connection_pool = conn;
 
-  dlist_detach(&conn->timeout_node);
+  deque_detach(&server->idle_timeouts, &conn->timeout_node);
   conn_cleanup(conn);
 }
 
@@ -502,8 +481,8 @@ static void handle_end(struct server_state *server, struct conn *conn) {
 static void handle_data_available(
     struct server_state *server, struct conn *conn) {
   conn->idle_start_us = get_monotonic_usec();
-  dlist_detach(&conn->timeout_node);
-  dlist_insert_before(&server->idle_timeouts, &conn->timeout_node);
+  deque_detach(&server->idle_timeouts, &conn->timeout_node);
+  deque_push_back(&server->idle_timeouts, &conn->timeout_node);
 
   // Reset wait states from poll
   if (conn->state == CONN_WAIT_READ) {
@@ -553,7 +532,7 @@ static void handle_new_connection(struct server_state *server) {
 
   struct conn *new_conn = get_available_conn(server);
   conn_init(new_conn, conn_fd);
-  dlist_insert_before(&server->idle_timeouts, &new_conn->timeout_node);
+  deque_push_back(&server->idle_timeouts, &new_conn->timeout_node);
 
   struct epoll_event conn_rw_event = {
       .events = EPOLLIN | EPOLLOUT | EPOLLET,
@@ -575,9 +554,10 @@ static void handle_timeouts(struct server_state *server) {
   uint64_t now_us = get_monotonic_usec();
 
   // Idle timeouts
-  while (!dlist_empty(&server->idle_timeouts)) {
+  struct deque_node *node;
+  while ((node = deque_peek_front(&server->idle_timeouts)) != NULL) {
     struct conn *next_timeout_conn =
-        container_of(server->idle_timeouts.next, struct conn, timeout_node);
+        container_of(node, struct conn, timeout_node);
     uint64_t next_timeout_us =
         next_timeout_conn->idle_start_us + CONN_TIMEOUT_US;
     if (next_timeout_us > now_us) {
@@ -588,7 +568,7 @@ static void handle_timeouts(struct server_state *server) {
         stderr, "closing connection [%d] after %lu ms of inactivty\n",
         next_timeout_conn->fd,
         (now_us - next_timeout_conn->idle_start_us) / USEC_PER_MSEC);
-    // This handles deletion of the dlist node
+    // This handles deletion of the queue node
     handle_end(server, next_timeout_conn);
   }
 
