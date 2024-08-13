@@ -15,8 +15,8 @@
 
 #include "buffer.h"
 #include "commands.h"
-#include "deque.h"
 #include "heap.h"
+#include "list.h"
 #include "protocol.h"
 #include "store.h"
 #include "types.h"
@@ -51,12 +51,15 @@ struct req_parser {
 };
 
 struct conn {
-  struct deque_node conn_pool_node;
+  union {
+    struct list_node free_list_node;
+    struct dlist_node active_list_node;
+  };
 
   int fd;
   enum conn_state state;
   uint64_t idle_start_us;
-  struct deque_node timeout_node;
+  struct dlist_node timeout_node;
 
   struct offset_buf read_buf;
   struct req_parser req_parser;
@@ -71,12 +74,11 @@ struct server_state {
   struct store store;
 
   // Free-list of connection objects
-  // TODO: Only single-linked list is needed here
-  struct deque free_conn_pool;
+  struct list free_conn_pool;
   // Active connections
-  struct deque active_conns;
+  struct dlist active_conns;
 
-  struct deque idle_timeouts;
+  struct dlist idle_timeouts;
 };
 
 [[noreturn]] static void die_errno(const char *msg) {
@@ -194,14 +196,14 @@ static void server_state_setup(struct server_state *server) {
   }
 
   store_init(&server->store);
-  deque_init(&server->active_conns);
-  deque_init(&server->free_conn_pool);
+  list_init(&server->free_conn_pool);
+  dlist_init(&server->active_conns);
 
-  deque_init(&server->idle_timeouts);
+  dlist_init(&server->idle_timeouts);
 }
 
 static int get_next_delay_ms(struct server_state *server) {
-  struct deque_node *timeout_node = deque_peek_front(&server->idle_timeouts);
+  struct dlist_node *timeout_node = dlist_peek_front(&server->idle_timeouts);
   if (timeout_node == NULL) {
     // Forever if there are no timeouts
     return -1;
@@ -233,22 +235,22 @@ static int get_next_delay_ms(struct server_state *server) {
 }
 
 static struct conn *get_available_conn(struct server_state *server) {
-  struct deque_node *available_node = deque_pop_front(&server->free_conn_pool);
+  struct list_node *available_node = list_pop(&server->free_conn_pool);
   struct conn *available;
   if (available_node != NULL) {
-    available = container_of(available_node, struct conn, conn_pool_node);
+    available = container_of(available_node, struct conn, free_list_node);
   } else {
     available = malloc(sizeof(*available));
   }
-  deque_push_back(&server->active_conns, &available->conn_pool_node);
+  dlist_push_back(&server->active_conns, &available->active_list_node);
   return available;
 }
 
 static void free_conn(struct server_state *server, struct conn *conn) {
-  deque_detach(&server->active_conns, &conn->conn_pool_node);
-  deque_push_front(&server->free_conn_pool, &conn->conn_pool_node);
+  dlist_detach(&server->active_conns, &conn->active_list_node);
+  list_push(&server->free_conn_pool, &conn->free_list_node);
 
-  deque_detach(&server->idle_timeouts, &conn->timeout_node);
+  dlist_detach(&server->idle_timeouts, &conn->timeout_node);
 
   // TODO: Skip freeing buffers since they can be reused? Maybe only free them
   // if they are large?
@@ -465,8 +467,8 @@ static void handle_end(struct server_state *server, struct conn *conn) {
 static void handle_data_available(
     struct server_state *server, struct conn *conn) {
   conn->idle_start_us = get_monotonic_usec();
-  deque_detach(&server->idle_timeouts, &conn->timeout_node);
-  deque_push_back(&server->idle_timeouts, &conn->timeout_node);
+  dlist_detach(&server->idle_timeouts, &conn->timeout_node);
+  dlist_push_back(&server->idle_timeouts, &conn->timeout_node);
 
   // Reset wait states from poll
   if (conn->state == CONN_WAIT_READ) {
@@ -516,7 +518,7 @@ static void handle_new_connection(struct server_state *server) {
 
   struct conn *new_conn = get_available_conn(server);
   conn_init(new_conn, conn_fd);
-  deque_push_back(&server->idle_timeouts, &new_conn->timeout_node);
+  dlist_push_back(&server->idle_timeouts, &new_conn->timeout_node);
 
   struct epoll_event conn_rw_event = {
       .events = EPOLLIN | EPOLLOUT | EPOLLET,
@@ -538,8 +540,8 @@ static void handle_timeouts(struct server_state *server) {
   uint64_t now_us = get_monotonic_usec();
 
   // Idle timeouts
-  struct deque_node *node;
-  while ((node = deque_peek_front(&server->idle_timeouts)) != NULL) {
+  struct dlist_node *node;
+  while ((node = dlist_peek_front(&server->idle_timeouts)) != NULL) {
     struct conn *next_timeout_conn =
         container_of(node, struct conn, timeout_node);
     uint64_t next_timeout_us =
