@@ -15,6 +15,15 @@ bool deque_empty(const struct deque *queue) {
   return queue->head.next == &queue->head;
 }
 
+void deque_push_front(struct deque *queue, struct deque_node *item) {
+  struct deque_node *next = queue->head.next;
+  next->prev = item;
+  item->next = next;
+
+  item->prev = &queue->head;
+  queue->head.next = item;
+}
+
 void deque_push_back(struct deque *queue, struct deque_node *item) {
   struct deque_node *prev = queue->head.prev;
   prev->next = item;

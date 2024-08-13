@@ -51,9 +51,7 @@ struct req_parser {
 };
 
 struct conn {
-  // Linked list pointers for managing connection pool
-  struct conn *prev;
-  struct conn *next;
+  struct deque_node conn_pool_node;
 
   int fd;
   enum conn_state state;
@@ -73,9 +71,10 @@ struct server_state {
   struct store store;
 
   // Free-list of connection objects
-  struct conn *connection_pool;
-  // active connection objects
-  struct conn *active_connections;
+  // TODO: Only single-linked list is needed here
+  struct deque free_conn_pool;
+  // Active connections
+  struct deque active_conns;
 
   struct deque idle_timeouts;
 };
@@ -195,8 +194,8 @@ static void server_state_setup(struct server_state *server) {
   }
 
   store_init(&server->store);
-  server->connection_pool = NULL;
-  server->active_connections = NULL;
+  deque_init(&server->active_conns);
+  deque_init(&server->free_conn_pool);
 
   deque_init(&server->idle_timeouts);
 }
@@ -234,40 +233,25 @@ static int get_next_delay_ms(struct server_state *server) {
 }
 
 static struct conn *get_available_conn(struct server_state *server) {
-  struct conn *available = server->connection_pool;
-  if (available != NULL) {
-    // prev pointers aren't used in the connection pool
-    server->connection_pool = available->next;
+  struct deque_node *available_node = deque_pop_front(&server->free_conn_pool);
+  struct conn *available;
+  if (available_node != NULL) {
+    available = container_of(available_node, struct conn, conn_pool_node);
   } else {
     available = malloc(sizeof(*available));
   }
-
-  available->prev = NULL;
-  available->next = server->active_connections;
-  server->active_connections = available;
-  if (available->next != NULL) {
-    available->next->prev = available;
-  }
+  deque_push_back(&server->active_conns, &available->conn_pool_node);
   return available;
 }
 
 static void free_conn(struct server_state *server, struct conn *conn) {
-  // TODO: Skip freeing buffers since they can be reused? Maybe only keep them
-  // if they are small/default size?
-  if (conn->prev != NULL) {
-    conn->prev->next = conn->next;
-  } else {
-    server->active_connections = conn->next;
-  }
-
-  if (conn->next != NULL) {
-    conn->next->prev = conn->prev;
-  }
-
-  conn->next = server->connection_pool;
-  server->connection_pool = conn;
+  deque_detach(&server->active_conns, &conn->conn_pool_node);
+  deque_push_front(&server->free_conn_pool, &conn->conn_pool_node);
 
   deque_detach(&server->idle_timeouts, &conn->timeout_node);
+
+  // TODO: Skip freeing buffers since they can be reused? Maybe only free them
+  // if they are large?
   conn_cleanup(conn);
 }
 

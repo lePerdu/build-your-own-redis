@@ -16,6 +16,7 @@ void deque_init(struct deque *queue);
 void deque_destroy(struct deque *queue);
 
 bool deque_empty(const struct deque *queue);
+void deque_push_front(struct deque *queue, struct deque_node *item);
 void deque_push_back(struct deque *queue, struct deque_node *item);
 struct deque_node *deque_pop_front(struct deque *queue);
 struct deque_node *deque_peek_front(struct deque *queue);
