@@ -15,6 +15,7 @@
 
 #include "buffer.h"
 #include "commands.h"
+#include "heap.h"
 #include "protocol.h"
 #include "store.h"
 #include "types.h"
@@ -229,6 +230,8 @@ static int get_next_delay_ms(struct server_state *server) {
   }
 
   uint64_t now_us = get_monotonic_usec();
+
+  // Idle timeouts
   struct conn *next_timeout_conn =
       container_of(server->idle_timeouts.next, struct conn, timeout_node);
   uint64_t next_timeout_us = next_timeout_conn->idle_start_us + CONN_TIMEOUT_US;
@@ -236,7 +239,19 @@ static int get_next_delay_ms(struct server_state *server) {
     return 0;
   }
 
-  return (int)((next_timeout_us - now_us) / USEC_PER_MSEC);
+  int next_delay = (int)((next_timeout_us - now_us) / USEC_PER_MSEC);
+
+  // Expire timeouts
+  if (!heap_empty(&server->store.expires)) {
+    uint64_t next_expire_us = heap_peek_min(&server->store.expires).value;
+    if (next_expire_us < now_us) {
+      return 0;
+    }
+
+    next_delay = (int)((next_expire_us - now_us) / USEC_PER_MSEC);
+  }
+
+  return next_delay;
 }
 
 static struct conn *get_available_conn(struct server_state *server) {
@@ -558,6 +573,8 @@ static void handle_new_connection(struct server_state *server) {
 
 static void handle_timeouts(struct server_state *server) {
   uint64_t now_us = get_monotonic_usec();
+
+  // Idle timeouts
   while (!dlist_empty(&server->idle_timeouts)) {
     struct conn *next_timeout_conn =
         container_of(server->idle_timeouts.next, struct conn, timeout_node);
@@ -574,6 +591,8 @@ static void handle_timeouts(struct server_state *server) {
     // This handles deletion of the dlist node
     handle_end(server, next_timeout_conn);
   }
+
+  store_delete_expired(&server->store, now_us);
 }
 
 int main(void) {

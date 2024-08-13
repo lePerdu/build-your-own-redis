@@ -48,4 +48,6 @@ int64_t store_object_get_expire(
 void store_object_set_expire(
     struct store *store, struct object *obj, int64_t timestamp_ms);
 
+void store_delete_expired(struct store *store, uint64_t before_us);
+
 #endif

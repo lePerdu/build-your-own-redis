@@ -14,9 +14,7 @@ void heap_init(struct heap *heap) {
   heap->data = malloc(sizeof(heap->data[0]) * heap->cap);
 }
 
-void heap_destroy(struct heap *heap) {
-  free(heap->data);
-}
+void heap_destroy(struct heap *heap) { free(heap->data); }
 
 static inline uint32_t heap_parent(uint32_t index) {
   assert(index > 0);
@@ -62,7 +60,8 @@ static void heap_fix_down(struct heap *heap, uint32_t index) {
 
     if (right < heap->size && heap->data[right].value < min_value) {
       min_child = right;
-      min_value = heap->data[right].value;
+      // min value only matteded for the first branch
+      // min_value = heap->data[right].value;
     }
 
     if (min_child == -1) {

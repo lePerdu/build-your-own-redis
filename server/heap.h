@@ -23,7 +23,9 @@ struct heap {
 void heap_init(struct heap *heap);
 void heap_destroy(struct heap *heap);
 
-static inline bool heap_empty(const struct heap *heap) { return heap->size == 0; }
+static inline bool heap_empty(const struct heap *heap) {
+  return heap->size == 0;
+}
 
 void heap_insert(struct heap *heap, uint64_t value, struct heap_ref *backref);
 void heap_update(struct heap *heap, uint32_t index, uint64_t new_value);

@@ -13,6 +13,8 @@
 enum {
   STORE_INIT_CAP = 64,
 
+  EXPIRE_MAX_WORK = 20,
+
   // TODO: Make the index signed, or just treat this as a special value?
   TTL_INDEX_NONE = UINT32_MAX,
 };
@@ -139,11 +141,44 @@ void store_object_set_expire(
     struct store *store, struct object *obj, int64_t timestamp_ms) {
   struct store_entry *entry = container_of(obj, struct store_entry, val);
   if (timestamp_ms < 0) {
-    if (entry->ttl_ref.index == TTL_INDEX_NONE) {
+    if (entry->ttl_ref.index != TTL_INDEX_NONE) {
       heap_pop(&store->expires, entry->ttl_ref.index);
       entry->ttl_ref.index = TTL_INDEX_NONE;
     }
   } else {
-    heap_insert(&store->expires, timestamp_ms, &entry->ttl_ref);
+    if (entry->ttl_ref.index == TTL_INDEX_NONE) {
+      heap_insert(&store->expires, timestamp_ms, &entry->ttl_ref);
+    } else {
+      heap_update(&store->expires, entry->ttl_ref.index, timestamp_ms);
+    }
+  }
+}
+
+void store_delete_expired(struct store *store, uint64_t before_us) {
+  for (unsigned deleted = 0;
+       deleted < EXPIRE_MAX_WORK && !heap_empty(&store->expires); deleted++) {
+    // Just peek, since freeing the entry removes it from the TTL heap
+    struct heap_node next = heap_peek_min(&store->expires);
+    if (next.value > before_us) {
+      break;
+    }
+
+    struct store_entry *to_expire =
+        container_of(next.backref, struct store_entry, ttl_ref);
+
+    // TODO: Refactor the hashmap API so that an entry can be deleted by
+    // reference (currently this isn't possible since we need the "parent" ref
+    // in the hash bucket linked list)
+    struct store_key key_ent = {
+        .entry.hash_code = to_expire->entry.hash_code,
+        .key = to_const_slice(to_expire->key),
+    };
+
+    struct hash_entry *removed_entry =
+        hash_map_delete(&store->map, &key_ent.entry, store_entry_compare);
+    assert(removed_entry == &to_expire->entry);
+
+    // This removes it from the heap
+    store_entry_free(store, to_expire);
   }
 }
