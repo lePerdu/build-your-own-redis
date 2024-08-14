@@ -164,6 +164,8 @@ static void test_hashmap_insert_and_delete_many_entries(void) {
     hash_map_insert(&map, (void *)inserted);
   }
 
+  assert(hash_map_size(&map) == STRESS_TEST_COUNT);
+
   // Remove even ones
   for (int i = 0; i < STRESS_TEST_COUNT; i += 2) {
     struct test_node key;
@@ -171,6 +173,7 @@ static void test_hashmap_insert_and_delete_many_entries(void) {
     struct test_node *removed =
         (void *)hash_map_delete(&map, (void *)&key, test_node_cmp);
     assert(removed != NULL);
+    assert(removed->val == i * 2);
     free(removed);
   }
 
