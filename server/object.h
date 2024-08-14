@@ -27,7 +27,7 @@ struct object {
 
     // These are both needed for ZSET
     struct {
-      struct hash_map hmap_val;
+      struct hash_map *hmap_val;
       struct avl_node *tree_val;
     };
   };

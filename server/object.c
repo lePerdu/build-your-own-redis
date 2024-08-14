@@ -22,6 +22,13 @@ static bool hmap_entry_free_iter(struct hash_entry *raw_ent, void *arg);
 static bool hset_entry_free_iter(struct hash_entry *raw_ent, void *arg);
 static bool zset_hash_entry_free_iter(struct hash_entry *raw_ent, void *arg);
 
+static void free_hmap_part(
+    struct hash_map *map, hash_entry_iter_fn free_entry) {
+  hash_map_iter(map, free_entry, NULL);
+  hash_map_destroy(map);
+  free(map);
+}
+
 void object_destroy(struct object obj) {
   switch (obj.type) {
     case OBJ_INT:
@@ -31,16 +38,13 @@ void object_destroy(struct object obj) {
       free(obj.str_val.data);
       break;
     case OBJ_HMAP:
-      hash_map_iter(&obj.hmap_val, hmap_entry_free_iter, NULL);
-      hash_map_destroy(&obj.hmap_val);
+      free_hmap_part(obj.hmap_val, hmap_entry_free_iter);
       break;
     case OBJ_HSET:
-      hash_map_iter(&obj.hmap_val, hset_entry_free_iter, NULL);
-      hash_map_destroy(&obj.hmap_val);
+      free_hmap_part(obj.hmap_val, hset_entry_free_iter);
       break;
     case OBJ_ZSET:
-      hash_map_iter(&obj.hmap_val, zset_hash_entry_free_iter, NULL);
-      hash_map_destroy(&obj.hmap_val);
+      free_hmap_part(obj.hmap_val, zset_hash_entry_free_iter);
       // Don't need to destroy the AVL tree because it uses the same nodes as
       // the hash table and doesn't have extra allocations
       break;
@@ -59,10 +63,10 @@ uint32_t object_allocation_complexity(const struct object *obj) {
     case OBJ_HSET:
     case OBJ_ZSET:
       // Entry and key for each object
-      return hash_map_size(&obj->hmap_val) * 2;
+      return hash_map_size(obj->hmap_val) * 2;
     case OBJ_HMAP:
       // Entry, key, and value for each object
-      return hash_map_size(&obj->hmap_val) * 3;
+      return hash_map_size(obj->hmap_val) * 3;
     default:
       assert(false);
   }
@@ -123,13 +127,15 @@ static bool hmap_entry_free_iter(struct hash_entry *raw_ent, void *arg) {
 
 struct object make_hmap_object(void) {
   struct object obj = {.type = OBJ_HMAP};
-  hash_map_init(&obj.hmap_val, HMAP_INIT_CAP);
+  obj.hmap_val = malloc(sizeof(*obj.hmap_val));
+  assert(obj.hmap_val != NULL);
+  hash_map_init(obj.hmap_val, HMAP_INIT_CAP);
   return obj;
 }
 
 struct object *hmap_get(struct object *obj, struct const_slice key) {
   assert(obj->type == OBJ_HMAP);
-  struct hash_map *map = &obj->hmap_val;
+  struct hash_map *map = obj->hmap_val;
 
   // TODO: Re-structure hashmap API to avoid double hashing when inserting?
   struct hmap_key key_ent = {
@@ -148,7 +154,7 @@ struct object *hmap_get(struct object *obj, struct const_slice key) {
 
 void hmap_set(struct object *obj, struct const_slice key, struct object val) {
   assert(obj->type == OBJ_HMAP);
-  struct hash_map *map = &obj->hmap_val;
+  struct hash_map *map = obj->hmap_val;
 
   // TODO: Re-structure hashmap API to avoid double hashing when inserting?
   struct hmap_key key_ent = {
@@ -171,7 +177,7 @@ void hmap_set(struct object *obj, struct const_slice key, struct object val) {
 
 bool hmap_del(struct object *obj, struct const_slice key) {
   assert(obj->type == OBJ_HMAP);
-  struct hash_map *map = &obj->hmap_val;
+  struct hash_map *map = obj->hmap_val;
 
   // TODO: Re-structure hashmap API to avoid double hashing when inserting?
   struct hmap_key key_ent = {
@@ -190,7 +196,7 @@ bool hmap_del(struct object *obj, struct const_slice key) {
 
 int_val_t hmap_size(struct object *obj) {
   assert(obj->type == OBJ_HMAP);
-  return hash_map_size(&obj->hmap_val);
+  return hash_map_size(obj->hmap_val);
 }
 
 struct hmap_iter_ctx {
@@ -207,7 +213,7 @@ static bool hmap_iter_wrapper(struct hash_entry *raw_ent, void *arg) {
 void hmap_iter(struct object *obj, hmap_iter_fn iter, void *arg) {
   assert(obj->type == OBJ_HMAP);
   struct hmap_iter_ctx ctx = {.callback = iter, .arg = arg};
-  hash_map_iter(&obj->hmap_val, hmap_iter_wrapper, &ctx);
+  hash_map_iter(obj->hmap_val, hmap_iter_wrapper, &ctx);
 }
 
 struct hset_entry {
@@ -222,7 +228,9 @@ struct hset_key {
 
 struct object make_hset_object(void) {
   struct object obj = {.type = OBJ_HSET};
-  hash_map_init(&obj.hmap_val, HSET_INIT_CAP);
+  obj.hmap_val = malloc(sizeof(*obj.hmap_val));
+  assert(obj.hmap_val != NULL);
+  hash_map_init(obj.hmap_val, HSET_INIT_CAP);
   return obj;
 }
 
@@ -264,13 +272,13 @@ bool hset_add(struct object *obj, struct const_slice key) {
   }
 
   struct hset_entry *new = hset_entry_alloc(key);
-  hash_map_insert(&obj->hmap_val, &new->entry);
+  hash_map_insert(obj->hmap_val, &new->entry);
   return true;
 }
 
 bool hset_contains(struct object *obj, struct const_slice key) {
   assert(obj->type == OBJ_HSET);
-  struct hash_map *set = &obj->hmap_val;
+  struct hash_map *set = obj->hmap_val;
 
   struct hset_key key_ent = {
       .entry.hash_code = slice_hash(key),
@@ -284,7 +292,7 @@ bool hset_contains(struct object *obj, struct const_slice key) {
 
 bool hset_del(struct object *obj, struct const_slice key) {
   assert(obj->type == OBJ_HSET);
-  struct hash_map *set = &obj->hmap_val;
+  struct hash_map *set = obj->hmap_val;
 
   struct hset_key key_ent = {
       .entry.hash_code = slice_hash(key),
@@ -303,7 +311,7 @@ bool hset_del(struct object *obj, struct const_slice key) {
 
 bool hset_pop(struct object *obj, struct slice *out) {
   assert(obj->type == OBJ_HSET);
-  struct hash_map *set = &obj->hmap_val;
+  struct hash_map *set = obj->hmap_val;
 
   struct hash_entry *found = hash_map_pop(set);
   if (found == NULL) {
@@ -316,7 +324,7 @@ bool hset_pop(struct object *obj, struct slice *out) {
 
 bool hset_peek(struct object *obj, struct const_slice *out) {
   assert(obj->type == OBJ_HSET);
-  struct hash_map *set = &obj->hmap_val;
+  struct hash_map *set = obj->hmap_val;
 
   struct hash_entry *found = hash_map_peek(set);
   if (found == NULL) {
@@ -328,7 +336,7 @@ bool hset_peek(struct object *obj, struct const_slice *out) {
 
 int_val_t hset_size(struct object *obj) {
   assert(obj->type == OBJ_HSET);
-  return hash_map_size(&obj->hmap_val);
+  return hash_map_size(obj->hmap_val);
 }
 
 struct hset_iter_ctx {
@@ -345,7 +353,7 @@ static bool hset_iter_wrapper(struct hash_entry *raw_ent, void *arg) {
 void hset_iter(struct object *obj, hset_iter_fn iter, void *arg) {
   assert(obj->type == OBJ_HSET);
   struct hset_iter_ctx ctx = {.callback = iter, .arg = arg};
-  hash_map_iter(&obj->hmap_val, hset_iter_wrapper, &ctx);
+  hash_map_iter(obj->hmap_val, hset_iter_wrapper, &ctx);
 }
 
 struct zset_node {
@@ -450,14 +458,16 @@ static bool zset_hash_entry_free_iter(struct hash_entry *raw_ent, void *arg) {
 
 struct object make_zset_object(void) {
   struct object obj = {.type = OBJ_ZSET};
-  hash_map_init(&obj.hmap_val, ZSET_INIT_CAP);
+  obj.hmap_val = malloc(sizeof(*obj.hmap_val));
+  assert(obj.hmap_val != NULL);
+  hash_map_init(obj.hmap_val, ZSET_INIT_CAP);
   obj.tree_val = NULL;
   return obj;
 }
 
 uint32_t zset_size(struct object *obj) {
   assert(obj->type == OBJ_ZSET);
-  uint32_t hash_size = hash_map_size(&obj->hmap_val);
+  uint32_t hash_size = hash_map_size(obj->hmap_val);
   uint32_t tree_size = avl_size(obj->tree_val);
   assert(hash_size == tree_size);
   return hash_size;
@@ -470,7 +480,7 @@ bool zset_score(struct object *obj, struct const_slice key, double *score) {
       .key = key,
   };
   struct hash_entry *found =
-      hash_map_get(&obj->hmap_val, &hash_key.base, zset_node_eq);
+      hash_map_get(obj->hmap_val, &hash_key.base, zset_node_eq);
   if (found == NULL) {
     return false;
   }
@@ -481,7 +491,7 @@ bool zset_score(struct object *obj, struct const_slice key, double *score) {
 
 bool zset_add(struct object *obj, struct const_slice key, double score) {
   assert(obj->type == OBJ_ZSET);
-  struct hash_map *map = &obj->hmap_val;
+  struct hash_map *map = obj->hmap_val;
 
   struct zset_hash_key key_ent = {
       .base.hash_code = slice_hash(key),
@@ -506,14 +516,14 @@ bool zset_add(struct object *obj, struct const_slice key, double score) {
 
 /*void zset_node_delete(struct object *obj, struct zset_node *node) {*/
 /*  assert(obj->type == OBJ_ZSET);*/
-/*  hash_map_detach_entry(&obj->hmap_val, &node->hash_base);*/
+/*  hash_map_detach_entry(obj->hmap_val, &node->hash_base);*/
 /*  avl_delete(&obj->tree_val, &node->avl_base);*/
 /*  zset_node_free(node);*/
 /*}*/
 
 bool zset_del(struct object *obj, struct const_slice key) {
   assert(obj->type == OBJ_ZSET);
-  struct hash_map *map = &obj->hmap_val;
+  struct hash_map *map = obj->hmap_val;
 
   struct zset_hash_key key_ent = {
       .base.hash_code = slice_hash(key),
@@ -536,7 +546,7 @@ bool zset_del(struct object *obj, struct const_slice key) {
 
 int64_t zset_rank(struct object *obj, struct const_slice key) {
   assert(obj->type == OBJ_ZSET);
-  struct hash_map *map = &obj->hmap_val;
+  struct hash_map *map = obj->hmap_val;
 
   struct zset_hash_key key_ent = {
       .base.hash_code = slice_hash(key),
