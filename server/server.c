@@ -407,7 +407,7 @@ static void reset_req_parser(struct req_parser *parser) {
   parser->parsed_args = 0;
 }
 
-static void handle_process_req(struct conn *conn, struct store *store) {
+static void handle_process_req(struct server_state *server, struct conn *conn) {
   enum parse_result parsed_size = run_req_parser(conn);
   switch (parsed_size) {
     case PARSE_ERR:
@@ -431,8 +431,12 @@ static void handle_process_req(struct conn *conn, struct store *store) {
   print_request(stderr, conn->req_parser.cmd, conn->req_parser.args);
   fputc('\n', stderr);
 
-  struct buffer *out_buf = &conn->write_buf.buf;
-  conn->req_parser.cmd->handler(store, conn->req_parser.args, out_buf);
+  conn->req_parser.cmd->handler((struct command_ctx){
+      .store = &server->store,
+      .args = conn->req_parser.args,
+      .out_buf = &conn->write_buf.buf,
+  });
+
   reset_req_parser(&conn->req_parser);
   conn->state = CONN_WRITE_RES;
 }
@@ -488,7 +492,7 @@ static void handle_data_available(
         handle_read_req(conn);
         break;
       case CONN_PROCESS_REQ:
-        handle_process_req(conn, &server->store);
+        handle_process_req(server, conn);
         break;
       case CONN_WRITE_RES:
         handle_write_res(conn);

@@ -28,26 +28,25 @@ uint64_t get_monotonic_usec(void) {
   return time.tv_sec * USEC_PER_SEC + time.tv_nsec / NSEC_PER_USEC;
 }
 
-static void do_get(
-    struct store *store, struct req_object args[1], struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_get(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
 
-  struct const_slice key = to_const_slice(args[0].str_val);
-  struct object *found = store_get(store, key);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
     return;
   }
 
   if (!object_is_scalar(found->type)) {
-    write_err_response(out_buf, "not scalar");
+    write_err_response(ctx.out_buf, "not scalar");
     return;
   }
 
-  write_object_response(out_buf, found);
+  write_object_response(ctx.out_buf, found);
 }
 
 static struct object make_object_from_req(struct req_object *req_o) {
@@ -65,36 +64,34 @@ static struct object make_object_from_req(struct req_object *req_o) {
   }
 }
 
-static void do_set(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_set(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
 
-  struct const_slice key = to_const_slice(args[0].str_val);
-  struct object val = make_object_from_req(&args[1]);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
+  struct object val = make_object_from_req(&ctx.args[1]);
 
-  store_set(store, key, val);
-  write_nil_response(out_buf);
+  store_set(ctx.store, key, val);
+  write_nil_response(ctx.out_buf);
 }
 
-static void do_del(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_del(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
 
   struct store_entry *removed =
-      store_detach(store, to_const_slice(args[0].str_val));
+      store_detach(ctx.store, to_const_slice(ctx.args[0].str_val));
   if (removed == NULL) {
-    write_bool_response(out_buf, false);
+    write_bool_response(ctx.out_buf, false);
     return;
   }
 
   store_entry_free(removed);
-  write_bool_response(out_buf, true);
+  write_bool_response(ctx.out_buf, true);
 }
 
 static bool append_key_to_response(
@@ -105,222 +102,215 @@ static bool append_key_to_response(
   return true;
 }
 
-static void do_keys(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  (void)args;
-  write_arr_response_header(out_buf, store_size(store));
+static void do_keys(struct command_ctx ctx) {
+  (void)ctx.args;
+  write_arr_response_header(ctx.out_buf, store_size(ctx.store));
 
-  store_iter(store, append_key_to_response, out_buf);
+  store_iter(ctx.store, append_key_to_response, ctx.out_buf);
 }
 
-static void do_ttl(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_ttl(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
 
-  struct const_slice key = to_const_slice(args[0].str_val);
-  struct object *found = store_get(store, key);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_int_response(out_buf, -2);
+    write_int_response(ctx.out_buf, -2);
     return;
   }
 
-  int64_t expires_at_us = store_object_get_expire(store, found);
+  int64_t expires_at_us = store_object_get_expire(ctx.store, found);
   if (expires_at_us < 0) {
-    write_int_response(out_buf, -1);
+    write_int_response(ctx.out_buf, -1);
     return;
   }
 
   uint64_t now = get_monotonic_usec();
   uint64_t ttl =
       (uint64_t)expires_at_us > now ? (expires_at_us - now) / USEC_PER_MSEC : 0;
-  write_int_response(out_buf, (int_val_t)ttl);
+  write_int_response(ctx.out_buf, (int_val_t)ttl);
 }
 
-static void do_expire(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_expire(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_INT) {
-    write_err_response(out_buf, "invalid ttl");
+  if (ctx.args[1].type != SER_INT) {
+    write_err_response(ctx.out_buf, "invalid ttl");
     return;
   }
-  int_val_t ttl_ms = args[1].int_val;
+  int_val_t ttl_ms = ctx.args[1].int_val;
 
   if (ttl_ms <= 0) {
     // Delegate to the DEL since it might decide to perform async deletion
-    do_del(store, args, out_buf);
+    // DEL just uses the first argument, so the context can be passed as-is
+    do_del(ctx);
     return;
   }
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_bool_response(out_buf, false);
+    write_bool_response(ctx.out_buf, false);
     return;
   }
 
   uint64_t expires_at_us = get_monotonic_usec() + ttl_ms * USEC_PER_MSEC;
-  store_object_set_expire(store, found, (int64_t)expires_at_us);
-  write_bool_response(out_buf, true);
+  store_object_set_expire(ctx.store, found, (int64_t)expires_at_us);
+  write_bool_response(ctx.out_buf, true);
 }
 
-static void do_persist(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_persist(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
 
-  struct const_slice key = to_const_slice(args[0].str_val);
-  struct object *found = store_get(store, key);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_bool_response(out_buf, false);
+    write_bool_response(ctx.out_buf, false);
     return;
   }
 
-  store_object_set_expire(store, found, -1);
-  write_bool_response(out_buf, true);
+  store_object_set_expire(ctx.store, found, -1);
+  write_bool_response(ctx.out_buf, true);
 }
 
-static void do_hget(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_hget(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
 
-  if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid field");
+  if (ctx.args[1].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid field");
     return;
   }
 
-  struct object *outer = store_get(store, to_const_slice(args[0].str_val));
+  struct object *outer =
+      store_get(ctx.store, to_const_slice(ctx.args[0].str_val));
   if (outer == NULL) {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
     return;
   }
 
   if (outer->type != OBJ_HMAP) {
-    write_err_response(out_buf, "object not a hash map");
+    write_err_response(ctx.out_buf, "object not a hash map");
     return;
   }
 
-  struct object *inner = hmap_get(outer, to_const_slice(args[1].str_val));
+  struct object *inner = hmap_get(outer, to_const_slice(ctx.args[1].str_val));
   if (inner == NULL) {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
     return;
   }
 
-  write_object_response(out_buf, inner);
+  write_object_response(ctx.out_buf, inner);
 }
 
-static void do_hset(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_hset(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid field");
+  if (ctx.args[1].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid field");
     return;
   }
-  struct const_slice field = to_const_slice(args[1].str_val);
+  struct const_slice field = to_const_slice(ctx.args[1].str_val);
 
-  struct object *outer = store_get(store, key);
+  struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
     // Create new hmap
-    outer = store_set(store, key, make_hmap_object());
+    outer = store_set(ctx.store, key, make_hmap_object());
   }
 
   if (outer->type != OBJ_HMAP) {
-    write_err_response(out_buf, "object not a hash map");
+    write_err_response(ctx.out_buf, "object not a hash map");
     return;
   }
 
-  hmap_set(outer, field, make_object_from_req(&args[2]));
-  write_nil_response(out_buf);
+  hmap_set(outer, field, make_object_from_req(&ctx.args[2]));
+  write_nil_response(ctx.out_buf);
 }
 
-static void do_hdel(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_hdel(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid field");
+  if (ctx.args[1].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid field");
     return;
   }
-  struct const_slice field = to_const_slice(args[1].str_val);
+  struct const_slice field = to_const_slice(ctx.args[1].str_val);
 
-  struct object *outer = store_get(store, key);
+  struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
-    write_bool_response(out_buf, false);
+    write_bool_response(ctx.out_buf, false);
     return;
   }
 
   if (outer->type != OBJ_HMAP) {
-    write_err_response(out_buf, "object not a hash map");
+    write_err_response(ctx.out_buf, "object not a hash map");
     return;
   }
 
   bool deleted = hmap_del(outer, field);
-  write_bool_response(out_buf, deleted);
+  write_bool_response(ctx.out_buf, deleted);
 }
 
-static void do_hlen(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_hlen(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_int_response(out_buf, 0);
+    write_int_response(ctx.out_buf, 0);
     return;
   }
 
   if (found->type != OBJ_HMAP) {
-    write_err_response(out_buf, "object not a hash map");
+    write_err_response(ctx.out_buf, "object not a hash map");
     return;
   }
 
-  write_int_response(out_buf, hmap_size(found));
+  write_int_response(ctx.out_buf, hmap_size(found));
 }
 
-static void do_hkeys(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_hkeys(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_arr_response_header(out_buf, 0);
+    write_arr_response_header(ctx.out_buf, 0);
     return;
   }
 
   if (found->type != OBJ_HMAP) {
-    write_err_response(out_buf, "object not a hash map");
+    write_err_response(ctx.out_buf, "object not a hash map");
     return;
   }
 
-  write_arr_response_header(out_buf, hmap_size(found));
-  hmap_iter(found, append_key_to_response, out_buf);
+  write_arr_response_header(ctx.out_buf, hmap_size(found));
+  hmap_iter(found, append_key_to_response, ctx.out_buf);
 }
 
 static bool append_key_val_to_response(
@@ -331,191 +321,184 @@ static bool append_key_val_to_response(
   return true;
 }
 
-static void do_hgetall(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_hgetall(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_arr_response_header(out_buf, 0);
+    write_arr_response_header(ctx.out_buf, 0);
     return;
   }
 
   if (found->type != OBJ_HMAP) {
-    write_err_response(out_buf, "object not a hash map");
+    write_err_response(ctx.out_buf, "object not a hash map");
     return;
   }
 
-  write_arr_response_header(out_buf, hmap_size(found) * 2);
-  hmap_iter(found, append_key_val_to_response, out_buf);
+  write_arr_response_header(ctx.out_buf, hmap_size(found) * 2);
+  hmap_iter(found, append_key_val_to_response, ctx.out_buf);
 }
 
-static void do_sadd(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_sadd(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid member");
+  if (ctx.args[1].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid member");
     return;
   }
-  struct const_slice set_key = to_const_slice(args[1].str_val);
+  struct const_slice set_key = to_const_slice(ctx.args[1].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    found = store_set(store, key, make_hset_object());
+    found = store_set(ctx.store, key, make_hset_object());
   }
 
   if (found->type != OBJ_HSET) {
-    write_err_response(out_buf, "object not a set");
+    write_err_response(ctx.out_buf, "object not a set");
     return;
   }
 
   bool added = hset_add(found, set_key);
-  write_bool_response(out_buf, added);
+  write_bool_response(ctx.out_buf, added);
 }
 
-static void do_sismember(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_sismember(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid member");
+  if (ctx.args[1].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid member");
     return;
   }
-  struct const_slice set_key = to_const_slice(args[1].str_val);
+  struct const_slice set_key = to_const_slice(ctx.args[1].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_bool_response(out_buf, false);
+    write_bool_response(ctx.out_buf, false);
     return;
   }
 
   if (found->type != OBJ_HSET) {
-    write_err_response(out_buf, "object not a set");
+    write_err_response(ctx.out_buf, "object not a set");
     return;
   }
 
   bool contains = hset_contains(found, set_key);
-  write_bool_response(out_buf, contains);
+  write_bool_response(ctx.out_buf, contains);
 }
 
-static void do_srem(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_srem(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid member");
+  if (ctx.args[1].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid member");
     return;
   }
-  struct const_slice set_key = to_const_slice(args[1].str_val);
+  struct const_slice set_key = to_const_slice(ctx.args[1].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_bool_response(out_buf, false);
+    write_bool_response(ctx.out_buf, false);
     return;
   }
 
   if (found->type != OBJ_HSET) {
-    write_err_response(out_buf, "object not a set");
+    write_err_response(ctx.out_buf, "object not a set");
     return;
   }
 
   bool removed = hset_del(found, set_key);
-  write_bool_response(out_buf, removed);
+  write_bool_response(ctx.out_buf, removed);
 }
 
-static void do_scard(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_scard(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_int_response(out_buf, 0);
+    write_int_response(ctx.out_buf, 0);
     return;
   }
 
   if (found->type != OBJ_HSET) {
-    write_err_response(out_buf, "object not a set");
+    write_err_response(ctx.out_buf, "object not a set");
     return;
   }
 
-  write_int_response(out_buf, hset_size(found));
+  write_int_response(ctx.out_buf, hset_size(found));
 }
 
-static void do_srandmember(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_srandmember(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
     return;
   }
 
   if (found->type != OBJ_HSET) {
-    write_err_response(out_buf, "object not a set");
+    write_err_response(ctx.out_buf, "object not a set");
     return;
   }
 
   struct const_slice member;
   bool found_member = hset_peek(found, &member);
   if (found_member) {
-    write_str_response(out_buf, member);
+    write_str_response(ctx.out_buf, member);
   } else {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
   }
 }
 
-static void do_spop(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_spop(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
     return;
   }
 
   if (found->type != OBJ_HSET) {
-    write_err_response(out_buf, "object not a set");
+    write_err_response(ctx.out_buf, "object not a set");
     return;
   }
 
   struct slice member;
   bool found_member = hset_pop(found, &member);
   if (found_member) {
-    write_str_response(out_buf, to_const_slice(member));
+    write_str_response(ctx.out_buf, to_const_slice(member));
     free(member.data);
   } else {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
   }
 }
 
@@ -525,220 +508,214 @@ static bool append_set_key_to_response(struct const_slice key, void *arg) {
   return true;
 }
 
-static void do_smembers(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_smembers(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_arr_response_header(out_buf, 0);
+    write_arr_response_header(ctx.out_buf, 0);
     return;
   }
 
   if (found->type != OBJ_HSET) {
-    write_err_response(out_buf, "object not a set");
+    write_err_response(ctx.out_buf, "object not a set");
     return;
   }
 
-  write_arr_response_header(out_buf, hset_size(found));
-  hset_iter(found, append_set_key_to_response, out_buf);
+  write_arr_response_header(ctx.out_buf, hset_size(found));
+  hset_iter(found, append_set_key_to_response, ctx.out_buf);
 }
 
-static void do_zscore(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_zscore(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
 
-  if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid member");
+  if (ctx.args[1].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid member");
     return;
   }
 
-  struct object *outer = store_get(store, to_const_slice(args[0].str_val));
+  struct object *outer =
+      store_get(ctx.store, to_const_slice(ctx.args[0].str_val));
   if (outer == NULL) {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
     return;
   }
 
   if (outer->type != OBJ_ZSET) {
-    write_err_response(out_buf, "object not a sorted set");
+    write_err_response(ctx.out_buf, "object not a sorted set");
     return;
   }
 
   double score;
-  bool found = zset_score(outer, to_const_slice(args[1].str_val), &score);
+  bool found = zset_score(outer, to_const_slice(ctx.args[1].str_val), &score);
   if (found) {
-    write_float_response(out_buf, score);
+    write_float_response(ctx.out_buf, score);
   } else {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
   }
 }
 
-static void do_zadd(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_zadd(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_FLOAT) {
-    write_err_response(out_buf, "invalid score");
+  if (ctx.args[1].type != SER_FLOAT) {
+    write_err_response(ctx.out_buf, "invalid score");
     return;
   }
-  double score = args[1].float_val;
+  double score = ctx.args[1].float_val;
 
-  if (args[2].type != SER_STR) {
-    write_err_response(out_buf, "invalid member");
+  if (ctx.args[2].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid member");
     return;
   }
-  struct const_slice member = to_const_slice(args[2].str_val);
+  struct const_slice member = to_const_slice(ctx.args[2].str_val);
 
-  struct object *outer = store_get(store, key);
+  struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
     // Create new set
-    outer = store_set(store, key, make_zset_object());
+    outer = store_set(ctx.store, key, make_zset_object());
   }
 
   if (outer->type != OBJ_ZSET) {
-    write_err_response(out_buf, "object not a sorted set");
+    write_err_response(ctx.out_buf, "object not a sorted set");
     return;
   }
 
   bool added = zset_add(outer, member, score);
-  write_bool_response(out_buf, added);
+  write_bool_response(ctx.out_buf, added);
 }
 
-static void do_zrem(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_zrem(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid member");
+  if (ctx.args[1].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid member");
     return;
   }
-  struct const_slice member = to_const_slice(args[1].str_val);
+  struct const_slice member = to_const_slice(ctx.args[1].str_val);
 
-  struct object *outer = store_get(store, key);
+  struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
-    write_bool_response(out_buf, false);
+    write_bool_response(ctx.out_buf, false);
     return;
   }
 
   if (outer->type != OBJ_ZSET) {
-    write_err_response(out_buf, "object not a sorted set");
+    write_err_response(ctx.out_buf, "object not a sorted set");
     return;
   }
 
   bool deleted = zset_del(outer, member);
-  write_bool_response(out_buf, deleted);
+  write_bool_response(ctx.out_buf, deleted);
 }
 
-static void do_zcard(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_zcard(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  struct object *found = store_get(store, key);
+  struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_int_response(out_buf, 0);
+    write_int_response(ctx.out_buf, 0);
     return;
   }
 
   if (found->type != OBJ_ZSET) {
-    write_err_response(out_buf, "object not a sorted set");
+    write_err_response(ctx.out_buf, "object not a sorted set");
     return;
   }
 
-  write_int_response(out_buf, zset_size(found));
+  write_int_response(ctx.out_buf, zset_size(found));
 }
 
-static void do_zrank(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_zrank(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_STR) {
-    write_err_response(out_buf, "invalid member");
+  if (ctx.args[1].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid member");
     return;
   }
-  struct const_slice member = to_const_slice(args[1].str_val);
+  struct const_slice member = to_const_slice(ctx.args[1].str_val);
 
-  struct object *outer = store_get(store, key);
+  struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
     return;
   }
 
   if (outer->type != OBJ_ZSET) {
-    write_err_response(out_buf, "object not a sorted set");
+    write_err_response(ctx.out_buf, "object not a sorted set");
     return;
   }
 
   int_val_t rank = zset_rank(outer, member);
   if (rank < 0) {
-    write_nil_response(out_buf);
+    write_nil_response(ctx.out_buf);
   } else {
-    write_int_response(out_buf, rank);
+    write_int_response(ctx.out_buf, rank);
   }
 }
 
-static void do_zquery(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  if (args[0].type != SER_STR) {
-    write_err_response(out_buf, "invalid key");
+static void do_zquery(struct command_ctx ctx) {
+  if (ctx.args[0].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid key");
     return;
   }
-  struct const_slice key = to_const_slice(args[0].str_val);
+  struct const_slice key = to_const_slice(ctx.args[0].str_val);
 
-  if (args[1].type != SER_FLOAT) {
-    write_err_response(out_buf, "invalid score");
+  if (ctx.args[1].type != SER_FLOAT) {
+    write_err_response(ctx.out_buf, "invalid score");
     return;
   }
-  double score = args[1].float_val;
+  double score = ctx.args[1].float_val;
 
-  if (args[2].type != SER_STR) {
-    write_err_response(out_buf, "invalid member");
+  if (ctx.args[2].type != SER_STR) {
+    write_err_response(ctx.out_buf, "invalid member");
     return;
   }
-  struct const_slice member = to_const_slice(args[2].str_val);
+  struct const_slice member = to_const_slice(ctx.args[2].str_val);
 
-  if (args[3].type != SER_INT) {
-    write_err_response(out_buf, "invalid offset");
+  if (ctx.args[3].type != SER_INT) {
+    write_err_response(ctx.out_buf, "invalid offset");
     return;
   }
-  int64_t offset = args[3].int_val;
+  int64_t offset = ctx.args[3].int_val;
 
-  if (args[4].type != SER_INT || args[4].int_val < 0) {
-    write_err_response(out_buf, "invalid limit");
+  if (ctx.args[4].type != SER_INT || ctx.args[4].int_val < 0) {
+    write_err_response(ctx.out_buf, "invalid limit");
     return;
   }
-  uint64_t limit = args[4].int_val;
+  uint64_t limit = ctx.args[4].int_val;
 
-  struct object *outer = store_get(store, key);
+  struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
-    write_arr_response_header(out_buf, 0);
+    write_arr_response_header(ctx.out_buf, 0);
     return;
   }
 
   if (outer->type != OBJ_ZSET) {
-    write_err_response(out_buf, "object not a sorted set");
+    write_err_response(ctx.out_buf, "object not a sorted set");
     return;
   }
 
@@ -746,7 +723,7 @@ static void do_zquery(
   start = zset_node_offset(start, offset);
 
   if (start == NULL) {
-    write_arr_response_header(out_buf, 0);
+    write_arr_response_header(ctx.out_buf, 0);
     return;
   }
 
@@ -755,21 +732,20 @@ static void do_zquery(
   uint32_t max_count = zset_size(outer) - zset_node_rank(outer, start);
   uint32_t count = limit < max_count ? limit : max_count;
 
-  write_arr_response_header(out_buf, count * 2);
+  write_arr_response_header(ctx.out_buf, count * 2);
   for (uint32_t i = 0; i < count; i++) {
     assert(start != NULL);
-    write_str_value(out_buf, zset_node_key(start));
-    write_float_value(out_buf, zset_node_score(start));
+    write_str_value(ctx.out_buf, zset_node_key(start));
+    write_float_value(ctx.out_buf, zset_node_score(start));
 
     start = zset_node_offset(start, 1);
   }
 }
 
-static void do_shutdown(
-    struct store *store, struct req_object *args, struct buffer *out_buf) {
-  (void)store;
-  (void)args;
-  (void)out_buf;
+static void do_shutdown(struct command_ctx ctx) {
+  (void)ctx.store;
+  (void)ctx.args;
+  (void)ctx.out_buf;
   exit(EXIT_SUCCESS);
 }
 

@@ -10,8 +10,15 @@
 
 #define COMMAND_ARGS_MAX 5
 
-typedef void (*command_handler)(
-    struct store *store, struct req_object *args, struct buffer *res_buf);
+struct command_ctx {
+  struct store *store;
+  struct req_object *args;
+  struct buffer *out_buf;
+};
+
+// TODO: Pass as pointer? The object is fairly small, so passing by value should
+// be fine and makes for slightly cleaner code (. vs ->)
+typedef void (*command_handler)(struct command_ctx ctx);
 
 struct command {
   const char *name;
