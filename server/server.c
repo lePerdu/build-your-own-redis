@@ -33,6 +33,8 @@ enum {
   WRITE_BUF_INIT_CAP = 4096,
 
   CONN_TIMEOUT_US = 60 * USEC_PER_SEC,
+
+  EXPIRE_MAX_WORK = 20,
 };
 
 enum conn_state {
@@ -558,7 +560,15 @@ static void handle_timeouts(struct server_state *server) {
     handle_end(server, next_timeout_conn);
   }
 
-  store_delete_expired(&server->store, now_us);
+  for (unsigned deleted = 0; deleted < EXPIRE_MAX_WORK; deleted++) {
+    struct store_entry *expired =
+        store_detach_next_expired(&server->store, now_us);
+    if (expired == NULL) {
+      break;
+    }
+
+    store_entry_free(expired);
+  }
 }
 
 int main(void) {

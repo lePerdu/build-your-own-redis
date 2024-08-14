@@ -86,9 +86,15 @@ static void do_del(
     return;
   }
 
-  struct const_slice key = to_const_slice(args[0].str_val);
-  bool found = store_del(store, key);
-  write_bool_response(out_buf, found);
+  struct store_entry *removed =
+      store_detach(store, to_const_slice(args[0].str_val));
+  if (removed == NULL) {
+    write_bool_response(out_buf, false);
+    return;
+  }
+
+  store_entry_free(removed);
+  write_bool_response(out_buf, true);
 }
 
 static bool append_key_to_response(
@@ -139,6 +145,7 @@ static void do_expire(
     write_err_response(out_buf, "invalid key");
     return;
   }
+  struct const_slice key = to_const_slice(args[0].str_val);
 
   if (args[1].type != SER_INT) {
     write_err_response(out_buf, "invalid ttl");
@@ -146,11 +153,9 @@ static void do_expire(
   }
   int_val_t ttl_ms = args[1].int_val;
 
-  struct const_slice key = to_const_slice(args[0].str_val);
-
   if (ttl_ms <= 0) {
-    bool removed = store_del(store, key);
-    write_bool_response(out_buf, removed);
+    // Delegate to the DEL since it might decide to perform async deletion
+    do_del(store, args, out_buf);
     return;
   }
 

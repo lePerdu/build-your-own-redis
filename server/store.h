@@ -13,21 +13,6 @@ struct store {
   struct heap expires;
 };
 
-struct store_entry {
-  struct hash_entry entry;
-  struct heap_ref ttl_ref;
-
-  // Owned
-  struct slice key;
-  // Owned
-  struct object val;
-};
-
-struct store_key {
-  struct hash_entry entry;
-  struct const_slice key;
-};
-
 void store_init(struct store *store);
 
 static inline uint32_t store_size(const struct store *store) {
@@ -37,7 +22,11 @@ static inline uint32_t store_size(const struct store *store) {
 struct object *store_get(struct store *store, struct const_slice key);
 struct object *store_set(
     struct store *store, struct const_slice key, struct object val);
-bool store_del(struct store *store, struct const_slice key);
+
+// Delete is 2 steps so the deletion can be async
+struct store_entry *store_detach(struct store *store, struct const_slice key);
+struct object *store_entry_object(struct store_entry *entry);
+void store_entry_free(struct store_entry *entry);
 
 typedef bool (*store_iter_fn)(
     struct const_slice key, struct object *val, void *arg);
@@ -48,6 +37,7 @@ int64_t store_object_get_expire(
 void store_object_set_expire(
     struct store *store, struct object *obj, int64_t timestamp_ms);
 
-void store_delete_expired(struct store *store, uint64_t before_us);
+struct store_entry *store_detach_next_expired(
+    struct store *store, uint64_t expired_after_us);
 
 #endif

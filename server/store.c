@@ -13,10 +13,23 @@
 enum {
   STORE_INIT_CAP = 64,
 
-  EXPIRE_MAX_WORK = 20,
-
   // TODO: Make the index signed, or just treat this as a special value?
   TTL_INDEX_NONE = UINT32_MAX,
+};
+
+struct store_entry {
+  struct hash_entry entry;
+  struct heap_ref ttl_ref;
+
+  // Owned
+  struct slice key;
+  // Owned
+  struct object val;
+};
+
+struct store_key {
+  struct hash_entry entry;
+  struct const_slice key;
 };
 
 void store_init(struct store *store) {
@@ -35,11 +48,7 @@ static struct store_entry *store_entry_alloc(
   return new;
 }
 
-static void store_entry_free(struct store *store, struct store_entry *ent) {
-  if (ent->ttl_ref.index != TTL_INDEX_NONE) {
-    heap_pop(&store->expires, ent->ttl_ref.index);
-  }
-
+void store_entry_free(struct store_entry *ent) {
   free(ent->key.data);
   object_destroy(ent->val);
   free(ent);
@@ -95,20 +104,33 @@ struct object *store_set(
   return &existing_ent->val;
 }
 
-bool store_del(struct store *store, struct const_slice key) {
-  // TODO: Re-structure hashmap API to avoid double hashing when inserting?
+/** Helper for detach functions */
+static struct store_entry *do_detach(
+    struct store *store, struct store_key *key) {
+  struct hash_entry *removed =
+      hash_map_delete(&store->map, &key->entry, store_entry_compare);
+  if (removed == NULL) {
+    return NULL;
+  }
+
+  struct store_entry *ent = container_of(removed, struct store_entry, entry);
+  if (ent->ttl_ref.index != TTL_INDEX_NONE) {
+    heap_pop(&store->expires, ent->ttl_ref.index);
+  }
+  return ent;
+}
+
+struct store_entry *store_detach(struct store *store, struct const_slice key) {
   struct store_key key_ent = {
       .entry.hash_code = slice_hash(key),
       .key = key,
   };
 
-  struct hash_entry *removed =
-      hash_map_delete(&store->map, &key_ent.entry, store_entry_compare);
-  if (removed != NULL) {
-    store_entry_free(store, container_of(removed, struct store_entry, entry));
-    return true;
-  }
-  return false;
+  return do_detach(store, &key_ent);
+}
+
+struct object *store_entry_object(struct store_entry *entry) {
+  return &entry->val;
 }
 
 struct store_iter_ctx {
@@ -154,31 +176,29 @@ void store_object_set_expire(
   }
 }
 
-void store_delete_expired(struct store *store, uint64_t before_us) {
-  for (unsigned deleted = 0;
-       deleted < EXPIRE_MAX_WORK && !heap_empty(&store->expires); deleted++) {
-    // Just peek, since freeing the entry removes it from the TTL heap
-    struct heap_node next = heap_peek_min(&store->expires);
-    if (next.value > before_us) {
-      break;
-    }
-
-    struct store_entry *to_expire =
-        container_of(next.backref, struct store_entry, ttl_ref);
-
-    // TODO: Refactor the hashmap API so that an entry can be deleted by
-    // reference (currently this isn't possible since we need the "parent" ref
-    // in the hash bucket linked list)
-    struct store_key key_ent = {
-        .entry.hash_code = to_expire->entry.hash_code,
-        .key = to_const_slice(to_expire->key),
-    };
-
-    struct hash_entry *removed_entry =
-        hash_map_delete(&store->map, &key_ent.entry, store_entry_compare);
-    assert(removed_entry == &to_expire->entry);
-
-    // This removes it from the heap
-    store_entry_free(store, to_expire);
+struct store_entry *store_detach_next_expired(
+    struct store *store, uint64_t expired_after_us) {
+  if (heap_empty(&store->expires)) {
+    return NULL;
   }
+
+  struct heap_node next = heap_peek_min(&store->expires);
+  if (next.value > expired_after_us) {
+    return NULL;
+  }
+  struct store_entry *to_expire =
+      container_of(next.backref, struct store_entry, ttl_ref);
+
+  // TODO: Refactor the hashmap API so that an entry can be deleted by
+  // reference (currently this isn't possible since we need the "parent" ref
+  // in the hash bucket linked list)
+  struct store_key key = {
+      .entry.hash_code = to_expire->entry.hash_code,
+      .key = to_const_slice(to_expire->key),
+  };
+
+  // do_detach handles removing the entry from the heap
+  struct store_entry *detached = do_detach(store, &key);
+  assert(detached == to_expire);
+  return to_expire;
 }
