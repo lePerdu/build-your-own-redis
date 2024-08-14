@@ -163,7 +163,7 @@ def test_smembers_decreases_after_hdel(c: Client):
 
 
 @client_test
-def test_sadd_and_sismember_10_000_keys(c: Client):
+def test_sadd_sismember_del_10_000_keys(c: Client):
     n = 10_000
 
     for i in range(n):
@@ -176,6 +176,9 @@ def test_sadd_and_sismember_10_000_keys(c: Client):
     for i in range(n):
         val = c.recv_resp()
         assert val is True
+
+    val = c.send(ReqType.DEL, "hash")
+    assert val is True
 
 
 @client_test

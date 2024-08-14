@@ -10,8 +10,14 @@
 #include "buffer.h"
 #include "object.h"
 #include "protocol.h"
+#include "queue.h"
 #include "store.h"
 #include "types.h"
+
+enum {
+  // Allocation complexity required before async deletion
+  ASYNC_DELETE_COMPLEXITY = 1000,
+};
 
 static void write_object_response(struct buffer *out, struct object *obj) {
   write_response_header(out, RES_OK);
@@ -26,6 +32,27 @@ uint64_t get_monotonic_usec(void) {
   assert(res == 0);
 
   return time.tv_sec * USEC_PER_SEC + time.tv_nsec / NSEC_PER_USEC;
+}
+
+static void store_entry_free_callback(void *arg) { store_entry_free(arg); }
+
+void submit_async_delete(
+    struct work_queue *task_queue, struct store_entry *to_delete) {
+  struct work_task task = {
+      .callback = store_entry_free_callback,
+      .arg = to_delete,
+  };
+  work_queue_push(task_queue, task);
+}
+
+void store_entry_free_maybe_async(
+    struct work_queue *task_queue, struct store_entry *to_delete) {
+  if (object_allocation_complexity(store_entry_object(to_delete)) >=
+      ASYNC_DELETE_COMPLEXITY) {
+    submit_async_delete(task_queue, to_delete);
+  } else {
+    store_entry_free(to_delete);
+  }
 }
 
 static void do_get(struct command_ctx ctx) {
@@ -90,7 +117,7 @@ static void do_del(struct command_ctx ctx) {
     return;
   }
 
-  store_entry_free(removed);
+  store_entry_free_maybe_async(ctx.async_task_queue, removed);
   write_bool_response(ctx.out_buf, true);
 }
 

@@ -48,6 +48,13 @@ static inline bool object_is_scalar(enum obj_type type) {
   }
 }
 
+/**
+ * Give a rough estimate for the number of allocations an object contains.
+ *
+ * This is used for determining whether to asynchronously free an object.
+ */
+uint32_t object_allocation_complexity(const struct object *obj);
+
 static inline struct object make_slice_object(struct slice slice) {
   return (struct object){.type = OBJ_STR, .str_val = slice};
 }

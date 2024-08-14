@@ -79,20 +79,26 @@ def test_pipeline_set_get_commands(c: Client):
 
 
 @client_test
-def test_set_and_get_10_000_keys(c: Client):
+def test_set_get_del_10_000_keys(c: Client):
     n = 10_000
 
     # Pipeline to speed things up
     for i in range(n):
         c.send_req(ReqType.SET, f"key:{i}", f"value:{i}")
     for i in range(n):
-        val = c.recv_resp()
+        _ = c.recv_resp()
 
     for i in range(n):
         c.send_req(ReqType.GET, f"key:{i}")
     for i in range(n):
         val = c.recv_resp()
         assert val == f"value:{i}".encode("ascii")
+
+    for i in range(n):
+        c.send_req(ReqType.DEL, f"key:{i}")
+    for i in range(n):
+        val = c.recv_resp()
+        assert val is True
 
 
 @client_test

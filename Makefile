@@ -11,7 +11,7 @@ BIN = bin
 
 SERVER_SRC = server
 
-COMMON_SRCS = avl.c buffer.c commands.c hashmap.c heap.c list.c object.c protocol.c store.c
+COMMON_SRCS = avl.c buffer.c commands.c hashmap.c heap.c list.c object.c protocol.c store.c queue.c
 COMMON_OBJS = $(COMMON_SRCS:%.c=$(BUILD)/%.o)
 
 SERVER_SRCS = server.c

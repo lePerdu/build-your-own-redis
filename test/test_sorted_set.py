@@ -230,7 +230,7 @@ def test_zquery_with_score_from_middle(c: Client):
 
 
 @client_test
-def test_zadd_and_zscore_10_000_keys(c: Client):
+def test_zadd_zscore_del_10_000_keys(c: Client):
     n = 10_000
 
     for i in range(n):
@@ -244,3 +244,6 @@ def test_zadd_and_zscore_10_000_keys(c: Client):
     for i in range(n):
         val = c.recv_resp()
         assert val == float(hash(i))
+
+    val = c.send(ReqType.DEL, "scores")
+    assert val is True

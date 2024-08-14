@@ -11,6 +11,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <threads.h>
 #include <unistd.h>
 
 #include "buffer.h"
@@ -18,6 +19,7 @@
 #include "heap.h"
 #include "list.h"
 #include "protocol.h"
+#include "queue.h"
 #include "store.h"
 #include "types.h"
 
@@ -81,6 +83,9 @@ struct server_state {
   struct dlist active_conns;
 
   struct dlist idle_timeouts;
+
+  thrd_t async_task_thread;
+  struct work_queue async_task_queue;
 };
 
 [[noreturn]] static void die_errno(const char *msg) {
@@ -179,6 +184,8 @@ static void conn_cleanup(struct conn *conn) {
   offset_buf_destroy(&conn->write_buf);
 }
 
+static int run_worker_thread(void *arg);
+
 static void server_state_setup(struct server_state *server) {
   server->socket_fd = setup_socket();
 
@@ -202,6 +209,13 @@ static void server_state_setup(struct server_state *server) {
   dlist_init(&server->active_conns);
 
   dlist_init(&server->idle_timeouts);
+
+  work_queue_init(&server->async_task_queue);
+  res = thrd_create(
+      // TODO: Figure out memory management. objects are not individually heap
+      // allocated, so their metadata needs to be copied into the free list?
+      &server->async_task_thread, run_worker_thread, &server->async_task_queue);
+  assert(res == thrd_success);
 }
 
 static int get_next_delay_ms(struct server_state *server) {
@@ -435,6 +449,7 @@ static void handle_process_req(struct server_state *server, struct conn *conn) {
       .store = &server->store,
       .args = conn->req_parser.args,
       .out_buf = &conn->write_buf.buf,
+      .async_task_queue = &server->async_task_queue,
   });
 
   reset_req_parser(&conn->req_parser);
@@ -571,8 +586,19 @@ static void handle_timeouts(struct server_state *server) {
       break;
     }
 
-    store_entry_free(expired);
+    store_entry_free_maybe_async(&server->async_task_queue, expired);
   }
+}
+
+static int run_worker_thread(void *arg) {
+  struct work_queue *queue = arg;
+
+  while (true) {
+    struct work_task task = work_queue_pop(queue);
+    task.callback(task.arg);
+  }
+
+  return thrd_error;
 }
 
 int main(void) {

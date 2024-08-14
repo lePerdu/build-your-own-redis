@@ -49,6 +49,25 @@ void object_destroy(struct object obj) {
   }
 }
 
+uint32_t object_allocation_complexity(const struct object *obj) {
+  switch (obj->type) {
+    case OBJ_INT:
+    case OBJ_FLOAT:
+      return 1;
+    case OBJ_STR:
+      return 2;
+    case OBJ_HSET:
+    case OBJ_ZSET:
+      // Entry and key for each object
+      return hash_map_size(&obj->hmap_val) * 2;
+    case OBJ_HMAP:
+      // Entry, key, and value for each object
+      return hash_map_size(&obj->hmap_val) * 3;
+    default:
+      assert(false);
+  }
+}
+
 void write_object(struct buffer *out, struct object *obj) {
   switch (obj->type) {
     case OBJ_INT:

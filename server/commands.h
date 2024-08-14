@@ -14,6 +14,7 @@ struct command_ctx {
   struct store *store;
   struct req_object *args;
   struct buffer *out_buf;
+  struct work_queue *async_task_queue;
 };
 
 // TODO: Pass as pointer? The object is fairly small, so passing by value should
@@ -38,5 +39,7 @@ enum {
 };
 
 uint64_t get_monotonic_usec(void);
+void store_entry_free_maybe_async(
+    struct work_queue *task_queue, struct store_entry *to_delete);
 
 #endif
