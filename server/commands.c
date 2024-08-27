@@ -60,17 +60,17 @@ static void do_get(struct command_ctx ctx) {
     return;
   }
 
-  if (!object_is_scalar(found->type)) {
-    write_simple_err_value(ctx.out_buf, "not scalar");
+  if (found->type != OBJ_STR) {
+    write_simple_err_value(ctx.out_buf, "not string value");
     return;
   }
 
-  write_object(ctx.out_buf, found);
+  write_str_value(ctx.out_buf, to_const_slice(found->str_val));
 }
 
 static void do_set(struct command_ctx ctx) {
   struct const_slice key = to_const_slice(ctx.args[1]);
-  store_set(ctx.store, key, swap_slice_into_object(&ctx.args[2]));
+  store_set(ctx.store, key, make_slice_object(slice_move(&ctx.args[2])));
   write_null_value(ctx.out_buf);
 }
 
@@ -86,7 +86,7 @@ static void do_del(struct command_ctx ctx) {
   write_bool_value(ctx.out_buf, true);
 }
 
-static bool append_key_to_value(
+static bool do_keys_append_key_to_value(
     struct const_slice key, struct object *val, void *arg) {
   (void)val;
   struct buffer *out_buf = arg;
@@ -97,7 +97,7 @@ static bool append_key_to_value(
 static void do_keys(struct command_ctx ctx) {
   write_array_header(ctx.out_buf, store_size(ctx.store));
 
-  store_iter(ctx.store, append_key_to_value, ctx.out_buf);
+  store_iter(ctx.store, do_keys_append_key_to_value, ctx.out_buf);
 }
 
 static void do_ttl(struct command_ctx ctx) {
@@ -171,13 +171,13 @@ static void do_hget(struct command_ctx ctx) {
     return;
   }
 
-  struct object *inner = hmap_get(outer, to_const_slice(ctx.args[2]));
-  if (inner == NULL) {
+  struct const_slice value;
+  if (!hmap_get(outer, to_const_slice(ctx.args[2]), &value)) {
     write_null_value(ctx.out_buf);
     return;
   }
 
-  write_object(ctx.out_buf, inner);
+  write_str_value(ctx.out_buf, value);
 }
 
 static void do_hset(struct command_ctx ctx) {
@@ -196,7 +196,7 @@ static void do_hset(struct command_ctx ctx) {
     return;
   }
 
-  hmap_set(outer, field, swap_slice_into_object(&ctx.args[3]));
+  hmap_set(outer, field, slice_move(&ctx.args[3]));
   write_null_value(ctx.out_buf);
 }
 
@@ -237,6 +237,15 @@ static void do_hlen(struct command_ctx ctx) {
   write_int_value(ctx.out_buf, hmap_size(found));
 }
 
+static bool do_hkeys_append_key_to_value(
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+    struct const_slice key, struct const_slice val, void *arg) {
+  (void)val;
+  struct buffer *out_buf = arg;
+  write_str_value(out_buf, key);
+  return true;
+}
+
 static void do_hkeys(struct command_ctx ctx) {
   struct const_slice key = to_const_slice(ctx.args[1]);
 
@@ -252,14 +261,14 @@ static void do_hkeys(struct command_ctx ctx) {
   }
 
   write_array_header(ctx.out_buf, hmap_size(found));
-  hmap_iter(found, append_key_to_value, ctx.out_buf);
+  hmap_iter(found, do_hkeys_append_key_to_value, ctx.out_buf);
 }
 
-static bool append_key_val_to_value(
-    struct const_slice key, struct object *val, void *arg) {
+static bool do_hgetall_append_key_val_to_value(
+    struct const_slice key, struct const_slice val, void *arg) {
   struct buffer *out_buf = arg;
   write_str_value(out_buf, key);
-  write_object(out_buf, val);
+  write_str_value(out_buf, val);
   return true;
 }
 
@@ -278,7 +287,7 @@ static void do_hgetall(struct command_ctx ctx) {
   }
 
   write_array_header(ctx.out_buf, hmap_size(found) * 2);
-  hmap_iter(found, append_key_val_to_value, ctx.out_buf);
+  hmap_iter(found, do_hgetall_append_key_val_to_value, ctx.out_buf);
 }
 
 static void do_sadd(struct command_ctx ctx) {

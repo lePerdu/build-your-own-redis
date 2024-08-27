@@ -69,7 +69,7 @@ static inline struct slice slice_dup(struct const_slice slice) {
   return make_slice(new_data, slice.size);
 }
 
-static inline struct slice slice_extract(struct slice *slice) {
+static inline struct slice slice_move(struct slice *slice) {
   struct slice original = *slice;
   slice->size = 0;
   slice->data = NULL;

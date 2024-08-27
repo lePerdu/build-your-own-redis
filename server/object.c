@@ -7,9 +7,7 @@
 #include <string.h>
 
 #include "avl.h"
-#include "buffer.h"
 #include "hashmap.h"
-#include "protocol.h"
 #include "types.h"
 
 enum {
@@ -31,9 +29,6 @@ static void free_hmap_part(
 
 void object_destroy(struct object obj) {
   switch (obj.type) {
-    case OBJ_INT:
-    case OBJ_FLOAT:
-      break;
     case OBJ_STR:
       free(obj.str_val.data);
       break;
@@ -55,11 +50,8 @@ void object_destroy(struct object obj) {
 
 uint32_t object_allocation_complexity(const struct object *obj) {
   switch (obj->type) {
-    case OBJ_INT:
-    case OBJ_FLOAT:
-      return 1;
     case OBJ_STR:
-      return 2;
+      return 1;
     case OBJ_HSET:
     case OBJ_ZSET:
       // Entry and key for each object
@@ -72,23 +64,10 @@ uint32_t object_allocation_complexity(const struct object *obj) {
   }
 }
 
-void write_object(struct buffer *out, struct object *obj) {
-  switch (obj->type) {
-    case OBJ_INT:
-      return write_int_value(out, obj->int_val);
-    case OBJ_FLOAT:
-      return write_float_value(out, obj->float_val);
-    case OBJ_STR:
-      return write_str_value(out, to_const_slice(obj->str_val));
-    default:
-      assert(false);
-  }
-}
-
 struct hmap_entry {
   struct hash_entry entry;
   struct slice key;
-  struct object val;
+  struct slice val;
 };
 
 struct hmap_key {
@@ -97,7 +76,7 @@ struct hmap_key {
 };
 
 static struct hmap_entry *hmap_entry_alloc(
-    struct const_slice key, struct object val) {
+    struct const_slice key, struct slice val) {
   struct hmap_entry *ent = malloc(sizeof(*ent));
   assert(ent != NULL);
   ent->entry.hash_code = slice_hash(key);
@@ -115,7 +94,7 @@ static bool hmap_entry_compare(
 
 static void hmap_entry_free(struct hmap_entry *entry) {
   free(entry->key.data);
-  object_destroy(entry->val);
+  free(entry->val.data);
   free(entry);
 }
 
@@ -133,7 +112,8 @@ struct object make_hmap_object(void) {
   return obj;
 }
 
-struct object *hmap_get(struct object *obj, struct const_slice key) {
+bool hmap_get(
+    struct object *obj, struct const_slice key, struct const_slice *val) {
   assert(obj->type == OBJ_HMAP);
   struct hash_map *map = obj->hmap_val;
 
@@ -146,13 +126,14 @@ struct object *hmap_get(struct object *obj, struct const_slice key) {
   struct hash_entry *found =
       hash_map_get(map, &key_ent.entry, hmap_entry_compare);
   if (found == NULL) {
-    return NULL;
+    return false;
   }
   struct hmap_entry *existing = container_of(found, struct hmap_entry, entry);
-  return &existing->val;
+  *val = to_const_slice(existing->val);
+  return true;
 }
 
-void hmap_set(struct object *obj, struct const_slice key, struct object val) {
+void hmap_set(struct object *obj, struct const_slice key, struct slice val) {
   assert(obj->type == OBJ_HMAP);
   struct hash_map *map = obj->hmap_val;
 
@@ -170,7 +151,7 @@ void hmap_set(struct object *obj, struct const_slice key, struct object val) {
   } else {
     struct hmap_entry *existing_ent =
         container_of(existing, struct hmap_entry, entry);
-    object_destroy(existing_ent->val);
+    free(existing_ent->val.data);
     existing_ent->val = val;
   }
 }
@@ -207,7 +188,8 @@ struct hmap_iter_ctx {
 static bool hmap_iter_wrapper(struct hash_entry *raw_ent, void *arg) {
   struct hmap_iter_ctx *ctx = arg;
   struct hmap_entry *ent = container_of(raw_ent, struct hmap_entry, entry);
-  return ctx->callback(to_const_slice(ent->key), &ent->val, ctx->arg);
+  return ctx->callback(
+      to_const_slice(ent->key), to_const_slice(ent->val), ctx->arg);
 }
 
 void hmap_iter(struct object *obj, hmap_iter_fn iter, void *arg) {

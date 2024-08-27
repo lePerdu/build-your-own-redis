@@ -5,13 +5,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "buffer.h"
 #include "hashmap.h"
 #include "types.h"
 
 enum obj_type {
-  OBJ_INT,
-  OBJ_FLOAT,
   OBJ_STR,
   OBJ_HMAP,
   OBJ_HSET,
@@ -21,8 +18,6 @@ enum obj_type {
 struct object {
   enum obj_type type;
   union {
-    int_val_t int_val;
-    double float_val;
     struct slice str_val;
 
     // These are both needed for ZSET
@@ -32,21 +27,6 @@ struct object {
     };
   };
 };
-
-static inline bool object_is_scalar(enum obj_type type) {
-  switch (type) {
-    case OBJ_INT:
-    case OBJ_FLOAT:
-    case OBJ_STR:
-      return true;
-    case OBJ_HMAP:
-    case OBJ_HSET:
-    case OBJ_ZSET:
-      return false;
-    default:
-      assert(false);
-  }
-}
 
 /**
  * Give a rough estimate for the number of allocations an object contains.
@@ -59,18 +39,6 @@ static inline struct object make_slice_object(struct slice slice) {
   return (struct object){.type = OBJ_STR, .str_val = slice};
 }
 
-static inline struct object swap_slice_into_object(struct slice *slice) {
-  return make_slice_object(slice_extract(slice));
-}
-
-static inline struct object make_int_object(int_val_t n) {
-  return (struct object){.type = OBJ_INT, .int_val = n};
-}
-
-static inline struct object make_float_object(double val) {
-  return (struct object){.type = OBJ_FLOAT, .float_val = val};
-}
-
 struct object make_hmap_object(void);
 struct object make_hset_object(void);
 struct object make_zset_object(void);
@@ -80,15 +48,14 @@ struct object make_zset_object(void);
  */
 void object_destroy(struct object obj);
 
-void write_object(struct buffer *out, struct object *obj);
-
-struct object *hmap_get(struct object *obj, struct const_slice key);
-void hmap_set(struct object *obj, struct const_slice key, struct object val);
+bool hmap_get(
+    struct object *obj, struct const_slice key, struct const_slice *val);
+void hmap_set(struct object *obj, struct const_slice key, struct slice val);
 bool hmap_del(struct object *obj, struct const_slice key);
 int_val_t hmap_size(struct object *obj);
 
 typedef bool (*hmap_iter_fn)(
-    struct const_slice key, struct object *val, void *arg);
+    struct const_slice key, struct const_slice val, void *arg);
 void hmap_iter(struct object *obj, hmap_iter_fn iter, void *arg);
 
 /** Returns `true` if the element was added, `false` if it already exists */
