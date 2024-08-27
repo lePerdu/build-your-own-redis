@@ -449,6 +449,7 @@ static void handle_process_req(struct server_state *server, struct conn *conn) {
       .store = &server->store,
       .args = conn->req_parser.args,
       .out_buf = &conn->write_buf.buf,
+      .async_task_thread = server->async_task_thread,
       .async_task_queue = &server->async_task_queue,
   });
 

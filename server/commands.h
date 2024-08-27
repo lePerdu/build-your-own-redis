@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <threads.h>
 
 #include "buffer.h"
 #include "protocol.h"
@@ -14,6 +15,7 @@ struct command_ctx {
   struct store *store;
   struct req_object *args;
   struct buffer *out_buf;
+  thrd_t async_task_thread;
   struct work_queue *async_task_queue;
 };
 

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <threads.h>
 #include <time.h>
 
 #include "buffer.h"
@@ -769,10 +770,21 @@ static void do_zquery(struct command_ctx ctx) {
   }
 }
 
+static void shutdown_work_thread(void *arg) {
+  (void)arg;
+  thrd_exit(0);
+}
+
 static void do_shutdown(struct command_ctx ctx) {
-  (void)ctx.store;
-  (void)ctx.args;
-  (void)ctx.out_buf;
+  // Gracefully exit the worker thread to please ASAN
+  work_queue_push_front(ctx.async_task_queue, (struct work_task){
+    .callback = shutdown_work_thread,
+    .arg = NULL,
+  });
+  int async_res;
+  int res = thrd_join(ctx.async_task_thread, &async_res);
+  assert(res == thrd_success);
+  assert(async_res == 0);
   exit(EXIT_SUCCESS);
 }
 
