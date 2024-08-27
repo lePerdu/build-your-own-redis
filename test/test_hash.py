@@ -177,7 +177,7 @@ def test_hset_hget_del_10_000_keys(c: Client):
         assert val == f"value:{i}".encode("ascii")
 
     val = c.send("DEL", "hash")
-    assert val is True
+    assert val == 1
 
 
 @client_test

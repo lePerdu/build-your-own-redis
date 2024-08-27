@@ -246,4 +246,4 @@ def test_zadd_zscore_del_10_000_keys(c: Client):
         assert val == float(hash(i))
 
     val = c.send("DEL", "scores")
-    assert val is True
+    assert val == 1

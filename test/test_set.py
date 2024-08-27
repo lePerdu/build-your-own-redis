@@ -3,81 +3,81 @@ from test_util import client_test
 
 
 @client_test
-def test_sadd_returns_true_if_missign(c: Client):
+def test_sadd_returns_1_if_missign(c: Client):
     val = c.send("SADD", "set", "key")
-    assert val is True
+    assert val == 1
 
 
 @client_test
-def test_sadd_returns_true_if_already_added(c: Client):
+def test_sadd_returns_0_if_already_added(c: Client):
     val = c.send("SADD", "set", "key")
     val = c.send("SADD", "set", "key")
-    assert val is False
+    assert val == 0
 
 
 @client_test
-def test_srem_returns_true_if_exists(c: Client):
+def test_srem_returns_1_if_exists(c: Client):
     _ = c.send("SADD", "set", "key")
     val = c.send("SREM", "set", "key")
-    assert val is True
+    assert val == 1
 
 
 @client_test
-def test_srem_returns_false_if_missing(c: Client):
+def test_srem_returns_0_if_missing(c: Client):
     _ = c.send("SADD", "set", "key1")
     val = c.send("SREM", "set", "key2")
-    assert val is False
+    assert val == 0
 
 
 @client_test
-def test_srem_returns_false_if_set_not_created(c: Client):
+def test_srem_returns_0_if_set_not_created(c: Client):
     val = c.send("SREM", "set", "key2")
-    assert val is False
+    assert val == 0
 
 
 @client_test
-def test_sadd_returns_true_if_readded(c: Client):
+def test_sadd_returns_1_if_readded(c: Client):
     val = c.send("SADD", "set", "key")
     val = c.send("SREM", "set", "key")
     val = c.send("SADD", "set", "key")
-    assert val is True
+    assert val == 1
 
 
 @client_test
-def test_sismember_returns_true_after_sadd(c: Client):
+def test_sismember_returns_1_after_sadd(c: Client):
     _ = c.send("SADD", "set", "key")
     val = c.send("SISMEMBER", "set", "key")
-    assert val is True
+    assert val == 1
 
 
 @client_test
-def test_sismember_returns_true_after_multiple_sadds(c: Client):
+def test_sismember_returns_1_after_multiple_sadds(c: Client):
     _ = c.send("SADD", "set", "key1")
     _ = c.send("SADD", "set", "key1")
 
     val = c.send("SISMEMBER", "set", "key1")
-    assert val is True
+    assert val == 1
 
 
 @client_test
-def test_sismember_returns_false_after_srem(c: Client):
+def test_sismember_returns_0_after_srem(c: Client):
     _ = c.send("SADD", "set", "key")
     _ = c.send("SREM", "set", "key")
     val = c.send("SISMEMBER", "set", "key")
-    assert val is False
+    assert val == 0
 
 
 @client_test
-def test_sismember_returns_false_if_set_not_created(c: Client):
+def test_sismember_returns_0_if_set_not_created(c: Client):
     val = c.send("SISMEMBER", "set", "key")
-    assert val is False
+    assert val == 0
 
 
 @client_test
-def test_sismember_returns_false_if_key_missign(c: Client):
+def test_sismember_returns_0_if_key_missign(c: Client):
     _ = c.send("SADD", "set", "key1")
     val = c.send("SISMEMBER", "set", "key2")
-    assert val is False
+    assert val == 0
 
 
 @client_test
@@ -175,10 +175,10 @@ def test_sadd_sismember_del_10_000_keys(c: Client):
         c.send_req("SISMEMBER", "hash", f"key:{i}")
     for i in range(n):
         val = c.recv_resp()
-        assert val is True
+        assert val == 1
 
     val = c.send("DEL", "hash")
-    assert val is True
+    assert val == 1
 
 
 @client_test
@@ -248,11 +248,11 @@ def test_spop_nil_if_set_empty(c: Client):
 
 
 @client_test
-def test_sismember_returns_false_after_spop(c: Client):
+def test_sismember_returns_0_after_spop(c: Client):
     val = c.send("SADD", "set", "key1")
     val = c.send("SPOP", "set")
     val = c.send("SISMEMBER", "set", "key1")
-    assert val is False
+    assert val == 0
 
 
 @client_test

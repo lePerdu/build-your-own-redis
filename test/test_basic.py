@@ -17,24 +17,33 @@ def test_get_not_exist_returns_error(c: Client):
 
 
 @client_test
-def test_get_returns_last_set_value(c: Client):
+def test_set_returns_ok_if_successful(c: Client):
     val = c.send("SET", "abc", 42)
+    assert val == b"OK"
+    # Also for overriding value
     val = c.send("SET", "abc", "def")
+    assert val == b"OK"
+
+
+@client_test
+def test_get_returns_last_set_value(c: Client):
+    _ = c.send("SET", "abc", 42)
+    _ = c.send("SET", "abc", "def")
     val = c.send("GET", "abc")
     assert val == b"def"
 
 
 @client_test
-def test_del_returns_false_if_not_present(c: Client):
+def test_del_returns_0_if_not_present(c: Client):
     val = c.send("DEL", "abc")
-    assert val is False
+    assert val == 0
 
 
 @client_test
-def test_del_returns_true_if_present(c: Client):
-    _ = c.send("SET", "abc", "def")
+def test_del_returns_1_if_present(c: Client):
+    val = c.send("SET", "abc", "def")
     val = c.send("DEL", "abc")
-    assert val is True
+    assert val == 1
 
 
 @client_test
@@ -84,7 +93,7 @@ def test_set_get_del_10_000_keys(c: Client):
         c.send_req("DEL", f"key:{i}")
     for i in range(n):
         val = c.recv_resp()
-        assert val is True
+        assert val == 1
 
 
 @client_test

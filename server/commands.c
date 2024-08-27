@@ -71,19 +71,19 @@ static void do_get(struct command_ctx ctx) {
 static void do_set(struct command_ctx ctx) {
   struct const_slice key = to_const_slice(ctx.args[1]);
   store_set(ctx.store, key, make_slice_object(slice_move(&ctx.args[2])));
-  write_null_value(ctx.out_buf);
+  write_simple_str_value(ctx.out_buf, "OK");
 }
 
 static void do_del(struct command_ctx ctx) {
   struct store_entry *removed =
       store_detach(ctx.store, to_const_slice(ctx.args[1]));
   if (removed == NULL) {
-    write_bool_value(ctx.out_buf, false);
+    write_int_value(ctx.out_buf, 0);
     return;
   }
 
   store_entry_free_maybe_async(ctx.async_task_queue, removed);
-  write_bool_value(ctx.out_buf, true);
+  write_int_value(ctx.out_buf, 1);
 }
 
 static bool do_keys_append_key_to_value(
@@ -100,17 +100,22 @@ static void do_keys(struct command_ctx ctx) {
   store_iter(ctx.store, do_keys_append_key_to_value, ctx.out_buf);
 }
 
+enum {
+  TTL_NOT_FOUND = -2,
+  TTL_NO_EXPIRE = -1,
+};
+
 static void do_ttl(struct command_ctx ctx) {
   struct const_slice key = to_const_slice(ctx.args[1]);
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_int_value(ctx.out_buf, -2);
+    write_int_value(ctx.out_buf, TTL_NOT_FOUND);
     return;
   }
 
   int64_t expires_at_us = store_object_get_expire(ctx.store, found);
   if (expires_at_us < 0) {
-    write_int_value(ctx.out_buf, -1);
+    write_int_value(ctx.out_buf, TTL_NO_EXPIRE);
     return;
   }
 
@@ -138,25 +143,29 @@ static void do_expire(struct command_ctx ctx) {
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_bool_value(ctx.out_buf, false);
+    write_int_value(ctx.out_buf, 0);
     return;
   }
 
   uint64_t expires_at_us = get_monotonic_usec() + ttl_ms * USEC_PER_MSEC;
   store_object_set_expire(ctx.store, found, (int64_t)expires_at_us);
-  write_bool_value(ctx.out_buf, true);
+  write_int_value(ctx.out_buf, 1);
 }
 
 static void do_persist(struct command_ctx ctx) {
   struct const_slice key = to_const_slice(ctx.args[1]);
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_bool_value(ctx.out_buf, false);
+    write_int_value(ctx.out_buf, 0);
     return;
   }
 
-  store_object_set_expire(ctx.store, found, -1);
-  write_bool_value(ctx.out_buf, true);
+  if (store_object_get_expire(ctx.store, found) == -1) {
+    write_int_value(ctx.out_buf, 0);
+  } else {
+    store_object_set_expire(ctx.store, found, -1);
+    write_int_value(ctx.out_buf, 1);
+  }
 }
 
 static void do_hget(struct command_ctx ctx) {
@@ -197,7 +206,7 @@ static void do_hset(struct command_ctx ctx) {
   }
 
   hmap_set(outer, field, slice_move(&ctx.args[3]));
-  write_null_value(ctx.out_buf);
+  write_int_value(ctx.out_buf, 1);
 }
 
 static void do_hdel(struct command_ctx ctx) {
@@ -207,7 +216,7 @@ static void do_hdel(struct command_ctx ctx) {
 
   struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
-    write_bool_value(ctx.out_buf, false);
+    write_int_value(ctx.out_buf, 0);
     return;
   }
 
@@ -217,7 +226,7 @@ static void do_hdel(struct command_ctx ctx) {
   }
 
   bool deleted = hmap_del(outer, field);
-  write_bool_value(ctx.out_buf, deleted);
+  write_int_value(ctx.out_buf, deleted ? 1 : 0);
 }
 
 static void do_hlen(struct command_ctx ctx) {
@@ -306,7 +315,7 @@ static void do_sadd(struct command_ctx ctx) {
   }
 
   bool added = hset_add(found, set_key);
-  write_bool_value(ctx.out_buf, added);
+  write_int_value(ctx.out_buf, added ? 1 : 0);
 }
 
 static void do_sismember(struct command_ctx ctx) {
@@ -316,7 +325,7 @@ static void do_sismember(struct command_ctx ctx) {
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_bool_value(ctx.out_buf, false);
+    write_int_value(ctx.out_buf, 0);
     return;
   }
 
@@ -326,7 +335,7 @@ static void do_sismember(struct command_ctx ctx) {
   }
 
   bool contains = hset_contains(found, set_key);
-  write_bool_value(ctx.out_buf, contains);
+  write_int_value(ctx.out_buf, contains ? 1 : 0);
 }
 
 static void do_srem(struct command_ctx ctx) {
@@ -336,7 +345,7 @@ static void do_srem(struct command_ctx ctx) {
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
-    write_bool_value(ctx.out_buf, false);
+    write_int_value(ctx.out_buf, 0);
     return;
   }
 
@@ -346,7 +355,7 @@ static void do_srem(struct command_ctx ctx) {
   }
 
   bool removed = hset_del(found, set_key);
-  write_bool_value(ctx.out_buf, removed);
+  write_int_value(ctx.out_buf, removed ? 1 : 0);
 }
 
 static void do_scard(struct command_ctx ctx) {
@@ -481,7 +490,7 @@ static void do_zadd(struct command_ctx ctx) {
   }
 
   bool added = zset_add(outer, member, score);
-  write_bool_value(ctx.out_buf, added);
+  write_int_value(ctx.out_buf, added ? 1 : 0);
 }
 
 static void do_zrem(struct command_ctx ctx) {
@@ -491,7 +500,7 @@ static void do_zrem(struct command_ctx ctx) {
 
   struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
-    write_bool_value(ctx.out_buf, false);
+    write_int_value(ctx.out_buf, 0);
     return;
   }
 
@@ -501,7 +510,7 @@ static void do_zrem(struct command_ctx ctx) {
   }
 
   bool deleted = zset_del(outer, member);
-  write_bool_value(ctx.out_buf, deleted);
+  write_int_value(ctx.out_buf, deleted ? 1 : 0);
 }
 
 static void do_zcard(struct command_ctx ctx) {
