@@ -42,7 +42,36 @@ void work_queue_push(struct work_queue *queue, struct work_task task) {
     queue->head = 0;
   }
 
-  queue->data[queue->size++] = task;
+  queue->data[queue->head + queue->size] = task;
+  queue->size++;
+
+  mtx_unlock(&queue->lock);
+  cnd_signal(&queue->not_empty);
+}
+
+void work_queue_push_front(struct work_queue *queue, struct work_task task) {
+  mtx_lock(&queue->lock);
+
+  if (queue->head == 0) {
+    if (queue->size < queue->cap) {
+      memmove(&queue->data[1], &queue->data[0], queue->size);
+    } else {
+      // Can't use re-alloc since the data will be moved inside the allocation
+      uint32_t new_cap = queue->cap * 2;
+      struct work_task *new_data = malloc(sizeof(new_data[0]) * new_cap);
+      assert(new_data != NULL);
+
+      memcpy(&new_data[1], queue->data, sizeof(queue->data[0]) * queue->size);
+      free(queue->data);
+      queue->data = new_data;
+      queue->cap = new_cap;
+    }
+    queue->head = 1;
+  }
+
+  queue->head--;
+  queue->size++;
+  queue->data[queue->head] = task;
 
   mtx_unlock(&queue->lock);
   cnd_signal(&queue->not_empty);
@@ -56,8 +85,12 @@ struct work_task work_queue_pop(struct work_queue *queue) {
   }
 
   struct work_task popped = queue->data[queue->head];
-  queue->head++;
   queue->size--;
+  if (queue->size == 0) {
+    queue->head = 0;
+  } else {
+    queue->head++;
+  }
   mtx_unlock(&queue->lock);
 
   return popped;

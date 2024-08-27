@@ -1,18 +1,19 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 
-#include "buffer.h"
 #include "protocol.h"
 #include "test.h"
 #include "types.h"
 
 // NOLINTBEGIN(readability-magic-numbers)
 
-#define make_array_const_slice(arr) make_const_slice(arr, sizeof(arr))
-#define make_array_slice(arr) make_slice(arr, sizeof(arr))
+#define make_input_slice(input_str) \
+  make_const_slice((input_str), sizeof(input_str) - 1)
 
 #define assert_slice_eq(a, b)                          \
   do {                                                 \
@@ -20,178 +21,133 @@
     assert(memcmp((a).data, (b).data, (a).size) == 0); \
   } while (false)
 
-static void test_parse_req_type(void) {
-  uint8_t buffer[] = {REQ_GET};
-
-  enum req_type type;
-  ssize_t n_parsed = parse_req_type(&type, make_array_const_slice(buffer));
-  assert(n_parsed == 1);
-  assert(type == REQ_GET);
+static void test_parse_blob_str_empty(void) {
+  struct const_slice input = make_input_slice("$0\r\n\r\n");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
+  assert(n_parsed == (ssize_t)input.size);
+  assert(str.size == 0);
 }
 
-static void test_parse_req_type_empty_buffer(void) {
-  enum req_type type;
-  ssize_t n_parsed = parse_req_type(&type, make_const_slice(NULL, 0));
+static void test_parse_blob_str_small(void) {
+  struct const_slice input = make_input_slice("$6\r\nHello!\r\n");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
+  assert(n_parsed == (ssize_t)input.size);
+  assert_slice_eq(str, make_str_slice("Hello!"));
+}
+
+static void test_parse_blob_str_large(void) {
+#define HEAD_SIZE (1 + 7 + 2)
+#define STR_SIZE 1200000
+#define TAIL_SIZE 2
+#define TOTAL_SIZE (HEAD_SIZE + STR_SIZE + TAIL_SIZE)
+
+  char *input = malloc(TOTAL_SIZE);
+  memcpy(input, "$1200000\r\n", HEAD_SIZE);
+  memset(&input[HEAD_SIZE], 0x55, STR_SIZE);
+  // NOLINTNEXTLINE(bugprone-not-null-terminated-result)
+  memcpy(&input[HEAD_SIZE + STR_SIZE], "\r\n", TAIL_SIZE);
+
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, make_const_slice(input, TOTAL_SIZE));
+  assert(n_parsed == TOTAL_SIZE);
+  assert(str.size == STR_SIZE);
+
+  free(input);
+#undef HEAD_SIZE
+#undef STR_SIZE
+#undef TAIL_SIZE
+#undef TOTAL_SIZE
+}
+
+// Not enough data
+
+static void test_parse_blob_str_empty_buf(void) {
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, make_const_slice(NULL, 0));
   assert(n_parsed == PARSE_MORE);
 }
 
-static void test_parse_req_object_int(void) {
-  uint8_t buffer[] = {SER_INT, 0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12};
-
-  struct req_object obj;
-  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
-  assert(n_parsed == 9);
-  assert(obj.type == SER_INT);
-  assert(obj.int_val == 0x123456789abcdef0L);
-}
-
-static void test_parse_req_object_int_need_more_data(void) {
-  uint8_t buffer[] = {SER_INT, 0xf0, 0xde, 0xbc};
-
-  struct req_object obj;
-  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+static void test_parse_blob_str_not_full_number(void) {
+  struct const_slice input = make_input_slice("$12");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
   assert(n_parsed == PARSE_MORE);
 }
 
-static void test_parse_req_object_str(void) {
-  uint8_t buffer[] = {
-      SER_STR, 5, 0, 0, 0, 'a', 'b', 'c', 'd', 'e',
-  };
-
-  struct req_object obj;
-  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
-  assert(n_parsed == 10);
-  assert(obj.type == SER_STR);
-  assert_slice_eq(obj.str_val, make_str_slice("abcde"));
-
-  req_object_destroy(&obj);
-}
-
-static void test_parse_req_object_str_need_more_data_for_len(void) {
-  uint8_t buffer[] = {
-      SER_STR,
-      5,
-      0,
-      0,
-  };
-
-  struct req_object obj;
-  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+static void test_parse_blob_str_number_and_cr(void) {
+  struct const_slice input = make_input_slice("$12\r");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
   assert(n_parsed == PARSE_MORE);
 }
 
-static void test_parse_req_object_str_need_more_data_after_len(void) {
-  uint8_t buffer[] = {SER_STR, 5, 0, 0, 0, 'a', 'b', 'c'};
-
-  struct req_object obj;
-  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+static void test_parse_blob_str_number_no_content(void) {
+  struct const_slice input = make_input_slice("$12\r\n");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
   assert(n_parsed == PARSE_MORE);
 }
 
-static void test_parse_req_object_invalid_type(void) {
-  uint8_t buffer[18] = {245};
+static void test_parse_blob_str_number_and_not_full_content(void) {
+  struct const_slice input = make_input_slice("$12\r\nabcdef");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
+  assert(n_parsed == PARSE_MORE);
+}
 
-  struct req_object obj;
-  ssize_t n_parsed = parse_req_object(&obj, make_array_const_slice(buffer));
+static void test_parse_blob_str_number_and_full_content_no_crlf(void) {
+  struct const_slice input = make_input_slice("$5\r\nABCdef");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
+  assert(n_parsed == PARSE_MORE);
+}
+
+// Invalid data
+
+static void test_parse_blob_str_invalid_type(void) {
+  struct const_slice input = make_input_slice(":5a\r\n");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
   assert(n_parsed == PARSE_ERR);
 }
 
-static void test_parse_req_object_empty_buffer(void) {
-  struct req_object obj;
-  ssize_t n_parsed = parse_req_object(&obj, make_const_slice(NULL, 0));
-  assert(n_parsed == PARSE_MORE);
+static void test_parse_blob_str_invalid_number(void) {
+  struct const_slice input = make_input_slice("$5a\r\n");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
+  assert(n_parsed == PARSE_ERR);
 }
 
-static void test_write_nil_response(void) {
-  uint8_t expected[] = {RES_OK, SER_NIL};
-
-  struct buffer buffer;
-  buffer_init(&buffer, sizeof(expected));
-
-  write_nil_response(&buffer);
-
-  assert_slice_eq(
-      buffer_const_slice(&buffer), make_array_const_slice(expected));
-  buffer_destroy(&buffer);
+static void test_parse_blob_str_invalid_crlf(void) {
+  struct const_slice input = make_input_slice("$5\r\r");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
+  assert(n_parsed == PARSE_ERR);
 }
 
-static void test_write_int_response(void) {
-  uint8_t expected[] = {RES_OK, SER_INT, 0xf0, 0xde, 0xbc,
-                        0x9a,   0x78,    0x56, 0x34, 0x12};
-
-  struct buffer buffer;
-  buffer_init(&buffer, sizeof(expected));
-
-  write_int_response(&buffer, 0x123456789abcdef0L);
-
-  assert_slice_eq(
-      buffer_const_slice(&buffer), make_array_const_slice(expected));
-  buffer_destroy(&buffer);
-}
-
-static void test_write_str_response(void) {
-  uint8_t expected[] = {RES_OK, SER_STR, 5, 0, 0, 0, 'a', 'b', 'c', 'd', 'e'};
-
-  struct buffer buffer;
-  buffer_init(&buffer, sizeof(expected));
-
-  write_str_response(&buffer, make_str_slice("abcde"));
-
-  assert_slice_eq(
-      buffer_const_slice(&buffer), make_array_const_slice(expected));
-  buffer_destroy(&buffer);
-}
-
-static void test_write_err_response(void) {
-  uint8_t expected[] = {RES_ERR, SER_STR, 5, 0, 0, 0, 'a', 'b', 'c', 'd', 'e'};
-
-  struct buffer buffer;
-  buffer_init(&buffer, sizeof(expected));
-
-  write_err_response(&buffer, "abcde");
-
-  assert_slice_eq(
-      buffer_const_slice(&buffer), make_array_const_slice(expected));
-  buffer_destroy(&buffer);
-}
-
-static void test_write_arr_response(void) {
-  uint8_t expected[] = {
-      RES_OK, SER_ARR, 2, 0,       0, 0, SER_INT, 0xff, 0x51, 0,   0,   0,
-      0,      0,       0, SER_STR, 3, 0, 0,       0,    '1',  '2', '3',
-  };
-
-  struct buffer buffer;
-  buffer_init(&buffer, sizeof(expected));
-
-  write_arr_response_header(&buffer, 2);
-  write_int_value(&buffer, 0x51ff);
-  write_str_value(&buffer, make_str_slice("123"));
-
-  assert_slice_eq(
-      buffer_const_slice(&buffer), make_array_const_slice(expected));
-  buffer_destroy(&buffer);
+static void test_parse_blob_str_no_crlf_after_content(void) {
+  struct const_slice input = make_input_slice("$5\r\nHELLOabc\r\n");
+  struct const_slice str;
+  ssize_t n_parsed = parse_blob_str(&str, input);
+  assert(n_parsed == PARSE_ERR);
 }
 
 // NOLINTEND(readability-magic-numbers)
 
 void test_parser(void) {
-  RUN_TEST(test_parse_req_type);
-  RUN_TEST(test_parse_req_type_empty_buffer);
-
-  RUN_TEST(test_parse_req_object_int);
-  RUN_TEST(test_parse_req_object_int_need_more_data);
-
-  RUN_TEST(test_parse_req_object_str);
-  RUN_TEST(test_parse_req_object_str_need_more_data_for_len);
-  RUN_TEST(test_parse_req_object_str_need_more_data_after_len);
-
-  RUN_TEST(test_parse_req_object_empty_buffer);
-  RUN_TEST(test_parse_req_object_invalid_type);
-
-  RUN_TEST(test_write_nil_response);
-  RUN_TEST(test_write_int_response);
-  RUN_TEST(test_write_str_response);
-  RUN_TEST(test_write_err_response);
-  RUN_TEST(test_write_arr_response);
+  RUN_TEST(test_parse_blob_str_empty);
+  RUN_TEST(test_parse_blob_str_small);
+  RUN_TEST(test_parse_blob_str_large);
+  RUN_TEST(test_parse_blob_str_empty_buf);
+  RUN_TEST(test_parse_blob_str_not_full_number);
+  RUN_TEST(test_parse_blob_str_number_and_cr);
+  RUN_TEST(test_parse_blob_str_number_no_content);
+  RUN_TEST(test_parse_blob_str_number_and_not_full_content);
+  RUN_TEST(test_parse_blob_str_number_and_full_content_no_crlf);
+  RUN_TEST(test_parse_blob_str_invalid_type);
+  RUN_TEST(test_parse_blob_str_invalid_number);
+  RUN_TEST(test_parse_blob_str_invalid_crlf);
+  RUN_TEST(test_parse_blob_str_no_crlf_after_content);
 }

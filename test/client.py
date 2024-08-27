@@ -1,66 +1,30 @@
 import enum
 import itertools
 import math
+import re
 import socket
-import struct
 import time
 from collections.abc import Buffer, Iterator
 from types import TracebackType
 
 
-class ReqType(enum.IntEnum):
-    GET = 0
-    SET = 1
-    DEL = 2
-    KEYS = 3
-    TTL = 4
-    EXPIRE = 5
-    PERSIST = 6
+class RespType(enum.Enum):
+    NULL = b"_"
+    BOOLEAN = b"#"
+    NUMBER = b":"
+    DOUBLE = b","
+    SIMPLE_STR = b"+"
+    SIMPLE_ERR = b"-"
+    BLOB_STR = b"$"
+    ARRAY = b"*"
 
-    HGET = 16
-    HSET = 17
-    HDEL = 18
-    HLEN = 19
-    HKEYS = 20
-    HGETALL = 21
-
-    SADD = 32
-    SISMEMBER = 33
-    SREM = 34
-    SCARD = 35
-    SRANDMEMBER = 36
-    SPOP = 37
-    SMEMBERS = 38
-
-    ZSCORE = 48
-    ZADD = 49
-    ZREM = 50
-    ZCARD = 51
-    ZRANK = 52
-    ZQUERY = 53
-
-    SHUTDOWN = 255
-
-
-class RespType(enum.IntEnum):
-    OK = 0
-    ERR = 1
-
-
-class ObjType(enum.IntEnum):
-    NIL = 0
-    TRUE = 1
-    FALSE = 2
-    INT = 3
-    FLOAT = 4
-    STR = 5
-    ARR = 6
+    @enum.property
+    def byte(self) -> int:
+        return self.value[0]
 
 
 ReqObject = int | float | str | bytes
 RespObject = None | int | float | bytes | list["RespObject"]
-
-Response = tuple[RespType, RespObject]
 
 
 class ClientError(Exception):
@@ -83,7 +47,7 @@ class ResponseError(ClientError):
     message: bytes
 
     def __init__(self, message: bytes):
-        super().__init__(self)
+        super().__init__(self, message.decode())
         self.message = message
 
 
@@ -94,27 +58,92 @@ class NotEnoughData(Exception):
     pass
 
 
-def extend_with_arg(buffer: bytearray, arg: ReqObject):
-    if isinstance(arg, int):
-        buffer.append(ObjType.INT)
-        buffer.extend(arg.to_bytes(8, "little", signed=True))
-    elif isinstance(arg, float):
-        buffer.append(ObjType.FLOAT)
-        buffer.extend(struct.pack("d", arg))
-    elif isinstance(arg, str):
-        buffer.append(ObjType.STR)
-        # TODO: Encode as UTF-8?
-        arg = arg.encode("ascii")
-        buffer.extend(len(arg).to_bytes(4, "little"))
-        buffer.extend(arg)
-    else:
-        assert isinstance(arg, bytes), f"Invalid request argument type: {type(arg)}"
-        buffer.append(ObjType.STR)
-        buffer.extend(len(arg).to_bytes(4, "little"))
-        buffer.extend(arg)
+def resp_serialize_array_header(buffer: bytearray, arr_len: int):
+    buffer.extend(RespType.ARRAY.value)
+    buffer.extend(f"{arr_len}\r\n".encode())
 
 
-def try_parse_object(buffer: Buffer) -> tuple[RespObject, Buffer]:
+def resp_serialize_object(buffer: bytearray, obj: ReqObject):
+    if isinstance(obj, int | float | str):
+        obj = f"{obj}".encode()
+    buffer.extend(RespType.BLOB_STR.value)
+    buffer.extend(f"{len(obj)}\r\n".encode())
+    buffer.extend(obj)
+    buffer.extend(b"\r\n")
+
+
+CR = ord("\r")
+LF = ord("\n")
+
+
+def skip_crlr(buffer: memoryview) -> memoryview:
+    if len(buffer) < 2:
+        raise NotEnoughData
+
+    if buffer[0] == CR and buffer[1] == LF:
+        return buffer[2:]
+
+    raise ParseError("expected <CR><LF>")
+
+
+POSSIBLE_NUMBER_REGEX = re.compile(rb"[+-]?\d*")
+POSSIBLE_DOUBLE_REGEX = re.compile(rb"[+-]?(\d+\.?\d*[eE]?[+-]?\d*)?|nan|-?inf")
+SIMPLE_STR_REGEX = re.compile(b"[^\r\n]*")
+
+
+def parse_number(buffer: memoryview) -> tuple[int, memoryview]:
+    m = POSSIBLE_NUMBER_REGEX.match(buffer)
+    if m is None:
+        raise ParseError("invalid number")
+    # Throws if <CR><LF> is invalid or more data is needed
+    after_crlf = skip_crlr(buffer[len(m[0]) :])
+    return int(m[0]), after_crlf
+
+
+def parse_double(buffer: memoryview) -> tuple[float, memoryview]:
+    m = POSSIBLE_DOUBLE_REGEX.match(buffer)
+    if m is None:
+        raise ParseError("invalid number")
+    # Throws if <CR><LF> is invalid or more data is needed
+    after_crlf = skip_crlr(buffer[len(m[0]) :])
+    return float(m[0]), after_crlf
+
+
+def parse_simple_str(buffer: memoryview) -> tuple[bytes, memoryview]:
+    m = SIMPLE_STR_REGEX.match(buffer)
+    if m is None:
+        raise ParseError("invalid simple string")
+    # Throws if <CR><LF> is invalid or more data is needed
+    after_crlf = skip_crlr(buffer[len(m[0]) :])
+    return m[0], after_crlf
+
+
+def parse_blob_str(buffer: memoryview) -> tuple[bytes, memoryview]:
+    str_len, buffer = parse_number(buffer)
+    if str_len < 0:
+        raise ParseError("invalid blob string length")
+    if len(buffer) < str_len + 2:
+        raise NotEnoughData
+    return bytes(buffer[:str_len]), skip_crlr(buffer[str_len:])
+
+
+def parse_array(buffer: Buffer) -> tuple[list[RespObject] | ResponseError, Buffer]:
+    # TODO: Store partial array in parser so array can be read incrementally
+    arr_len, buffer = parse_number(memoryview(buffer))
+    if arr_len < 0:
+        raise ParseError("invalid array length")
+
+    arr: list[RespObject] = []
+    for _ in range(arr_len):
+        elem, buffer = try_parse_object(buffer)
+        # TODO: How to handle this case?
+        if isinstance(elem, ResponseError):
+            return elem, buffer
+        arr.append(elem)
+    return arr, buffer
+
+
+def try_parse_object(buffer: Buffer) -> tuple[RespObject | ResponseError, Buffer]:
     buffer = memoryview(buffer)
     if len(buffer) == 0:
         raise NotEnoughData
@@ -122,52 +151,34 @@ def try_parse_object(buffer: Buffer) -> tuple[RespObject, Buffer]:
     type_byte = buffer[0]
     buffer = buffer[1:]
     match type_byte:
-        case ObjType.NIL:
-            return None, buffer
-        case ObjType.TRUE:
-            return True, buffer
-        case ObjType.FALSE:
-            return False, buffer
-        case ObjType.INT:
-            if len(buffer) < 8:
+        case RespType.NULL.byte:
+            return None, skip_crlr(buffer)
+        case RespType.BOOLEAN.byte:
+            if len(buffer) < 3:
                 raise NotEnoughData
-            return int.from_bytes(buffer[:8], "little", signed=True), buffer[8:]
-        case ObjType.FLOAT:
-            if len(buffer) < 8:
-                raise NotEnoughData
-            val: float = struct.unpack("d", buffer[:8])[0]
-            return val, buffer[8:]
-        case ObjType.STR:
-            if len(buffer) < 4:
-                raise NotEnoughData
-            str_len = int.from_bytes(buffer[:4], "little")
-            buffer = buffer[4:]
-            if len(buffer) < str_len:
-                raise NotEnoughData
-            return bytes(buffer[:str_len]), buffer[str_len:]
-        case ObjType.ARR:
-            if len(buffer) < 4:
-                raise NotEnoughData
+            if buffer[0] == ord("t"):
+                val = True
+            elif buffer[0] == ord("f"):
+                val = False
+            else:
+                raise ParseError(f"expected `t' or `f' but got {buffer[0:1]}")
 
-            arr_len = int.from_bytes(buffer[:4], "little")
-            buffer = buffer[4:]
-            arr: list[RespObject] = []
-            for _ in range(arr_len):
-                elem, buffer = try_parse_object(buffer)
-                arr.append(elem)
-            return arr, buffer
+            return val, skip_crlr(buffer[1:])
+        case RespType.NUMBER.byte:
+            return parse_number(buffer)
+        case RespType.DOUBLE.byte:
+            return parse_double(buffer)
+        case RespType.SIMPLE_STR.byte:
+            return parse_simple_str(buffer)
+        case RespType.SIMPLE_ERR.byte:
+            msg, buffer = parse_simple_str(buffer)
+            return ResponseError(msg), buffer
+        case RespType.BLOB_STR.byte:
+            return parse_blob_str(buffer)
+        case RespType.ARRAY.byte:
+            return parse_array(buffer)
         case _:
-            raise ParseError(f"Invalid response type: f{type_byte}")
-
-
-def try_parse_response(buffer: Buffer) -> tuple[Response, Buffer]:
-    buffer = memoryview(buffer)
-
-    if len(buffer) == 0:
-        raise NotEnoughData
-    resp_code = RespType(buffer[0])
-    obj, rest = try_parse_object(buffer[1:])
-    return (resp_code, obj), rest
+            raise ParseError(f"Invalid response type: {bytes((type_byte,))}")
 
 
 def retry_for_connection(
@@ -211,12 +222,12 @@ class Client:
         self.recv_buf = bytearray(4096)
         self.recv_len = 0
 
-    def send_req(self, request: ReqType, *args: ReqObject):
+    def send_req(self, *args: ReqObject):
         """Send a single request, but don't wait for the response."""
         buffer = bytearray()
-        buffer.append(request)
+        resp_serialize_array_header(buffer, len(args))
         for a in args:
-            extend_with_arg(buffer, a)
+            resp_serialize_object(buffer, a)
 
         print("sending", buffer)
         self.conn.sendall(buffer)
@@ -226,21 +237,15 @@ class Client:
         # TODO: Reduce the amount of copies
         while True:
             try:
-                (resp_code, resp_obj), rest = try_parse_response(
+                resp_obj, rest = try_parse_object(
                     memoryview(self.recv_buf)[: self.recv_len]
                 )
                 # Reset the buffers after a good parse
                 self.recv_buf = bytearray(rest)
                 self.recv_len = len(self.recv_buf)
-                if resp_code == RespType.OK:
-                    return resp_obj
-                else:
-                    if isinstance(resp_obj, bytes):
-                        raise ResponseError(resp_obj)
-                    else:
-                        raise ProtocolError(
-                            f"Unexpected error message type: {type(resp_obj)}"
-                        )
+                if isinstance(resp_obj, ResponseError):
+                    raise resp_obj
+                return resp_obj
             except NotEnoughData:
                 pass
 
@@ -254,15 +259,15 @@ class Client:
                 raise UnexpectedEofError
             self.recv_len += chunk_len
 
-    def send(self, request: ReqType, *args: ReqObject) -> RespObject:
+    def send(self, *args: ReqObject) -> RespObject:
         """Send and receive a single response."""
-        self.send_req(request, *args)
+        self.send_req(*args)
         return self.recv_resp()
 
     def send_shutdown(self):
         """This needs some special handling since the server won't send a response."""
         try:
-            val = self.send(ReqType.SHUTDOWN)
+            val = self.send(b"SHUTDOWN")
         except UnexpectedEofError:
             return
         raise ProtocolError("Unexpected response from SHUTDOWN command", val)

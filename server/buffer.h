@@ -25,6 +25,15 @@ static inline void *buffer_tail(struct buffer *buf) {
   return buf->data + buf->size;
 }
 
+static inline uint32_t buffer_remaining(const struct buffer *buf) {
+  return buf->cap - buf->size;
+}
+
+static inline void buffer_inc_size(struct buffer *buf, uint32_t inc) {
+  assert(buf->size + inc <= buf->cap);
+  buf->size += inc;
+}
+
 void buffer_init(struct buffer *buf, uint32_t init_cap);
 void buffer_destroy(struct buffer *buf);
 

@@ -1,5 +1,6 @@
 CFLAGS_BASE = -std=c17 -Wall -Wextra -D_XOPEN_SOURCE=600
 CFLAGS_OPT = -Og -g -fno-omit-frame-pointer -fsanitize=address
+LDFLAGS = -lm
 
 CFLAGS ?= $(CFLAGS_BASE) $(CFLAGS_OPT)
 
@@ -18,7 +19,7 @@ SERVER_SRCS = server.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(BUILD)/%.o)
 SERVER_EXEC = $(BIN)/server
 
-TEST_SRCS = test.c test_avl.c test_hashmap.c test_heap.c test_parser.c
+TEST_SRCS = test.c test_avl.c test_hashmap.c test_heap.c test_parser.c test_writer.c
 TEST_OBJS = $(TEST_SRCS:%.c=$(BUILD)/%.o)
 TEST_EXEC = $(BIN)/unit_test
 

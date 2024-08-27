@@ -28,6 +28,7 @@ static inline bool work_queue_empty(const struct work_queue *queue) {
 }
 
 void work_queue_push(struct work_queue *queue, struct work_task task);
+void work_queue_push_front(struct work_queue *queue, struct work_task task);
 /**
  * Wait until there is at least 1 item in the queue, then remove and return the
  * first item

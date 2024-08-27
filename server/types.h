@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 typedef int64_t int_val_t;
 
@@ -68,11 +69,28 @@ static inline struct slice slice_dup(struct const_slice slice) {
   return make_slice(new_data, slice.size);
 }
 
+static inline struct slice slice_extract(struct slice *slice) {
+  struct slice original = *slice;
+  slice->size = 0;
+  slice->data = NULL;
+  return original;
+}
+
 static inline bool slice_eq(
     struct const_slice slice_a, struct const_slice slice_b) {
   return (
       slice_a.size == slice_b.size &&
       memcmp(slice_a.data, slice_b.data, slice_a.size) == 0);
+}
+
+static inline ssize_t slice_index_of(struct const_slice slice, uint8_t byte) {
+  // Can't use strchr because it needs to consider the slice size
+  for (size_t i = 0; i < slice.size; i++) {
+    if (const_slice_get(slice, i) == byte) {
+      return (ssize_t)i;
+    }
+  }
+  return -1;
 }
 
 #endif

@@ -59,6 +59,10 @@ static inline struct object make_slice_object(struct slice slice) {
   return (struct object){.type = OBJ_STR, .str_val = slice};
 }
 
+static inline struct object swap_slice_into_object(struct slice *slice) {
+  return make_slice_object(slice_extract(slice));
+}
+
 static inline struct object make_int_object(int_val_t n) {
   return (struct object){.type = OBJ_INT, .int_val = n};
 }

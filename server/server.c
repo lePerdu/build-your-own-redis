@@ -49,8 +49,8 @@ enum conn_state {
 };
 
 struct req_parser {
-  const struct command *cmd;
-  struct req_object args[COMMAND_ARGS_MAX];
+  int arg_count;
+  struct slice args[COMMAND_ARGS_MAX];
   int parsed_args;
 };
 
@@ -160,7 +160,7 @@ static int setup_socket(void) {
 }
 
 static void req_parser_init(struct req_parser *parser) {
-  parser->cmd = NULL;
+  parser->arg_count = -1;
   parser->parsed_args = 0;
 }
 
@@ -216,6 +216,8 @@ static void server_state_setup(struct server_state *server) {
       // allocated, so their metadata needs to be copied into the free list?
       &server->async_task_thread, run_worker_thread, &server->async_task_queue);
   assert(res == thrd_success);
+
+  init_commands();
 }
 
 static int get_next_delay_ms(struct server_state *server) {
@@ -383,47 +385,47 @@ static enum parse_result run_req_parser(struct conn *conn) {
   struct req_parser *parser = &conn->req_parser;
 
   ssize_t res;
-  if (parser->cmd == NULL) {
-    enum req_type type;
-    res = parse_req_type(&type, offset_buf_head_slice(&conn->read_buf));
+  if (parser->arg_count < 0) {
+    uint32_t arg_count;
+    res =
+        parse_array_header(&arg_count, offset_buf_head_slice(&conn->read_buf));
     if (res < 0) {
       return res;
     }
+    offset_buf_advance(&conn->read_buf, res);
 
-    parser->cmd = lookup_command(type);
-    if (parser->cmd == NULL) {
+    if (arg_count == 0 || arg_count > COMMAND_ARGS_MAX) {
       return PARSE_ERR;
     }
-    parser->parsed_args = 0;
 
-    offset_buf_advance(&conn->read_buf, res);
+    parser->arg_count = (int)arg_count;
   }
 
-  while (parser->parsed_args < parser->cmd->arg_count) {
-    res = parse_req_object(
-        &parser->args[parser->parsed_args],
-        offset_buf_head_slice(&conn->read_buf));
+  while (parser->parsed_args < parser->arg_count) {
+    struct const_slice ref_arg;
+    res = parse_blob_str(&ref_arg, offset_buf_head_slice(&conn->read_buf));
     if (res < 0) {
       return res;
     }
     offset_buf_advance(&conn->read_buf, res);
-    parser->parsed_args++;
+    // TODO: Don't copy arg strings until the read buffer is cleared
+    // (which it won't need to be in the common case)
+    parser->args[parser->parsed_args++] = slice_dup(ref_arg);
   }
 
   return PARSE_OK;
 }
 
 static void reset_req_parser(struct req_parser *parser) {
-  parser->cmd = NULL;
   for (int i = 0; i < parser->parsed_args; i++) {
-    req_object_destroy(&parser->args[i]);
+    free(parser->args[i].data);
   }
-  parser->parsed_args = 0;
+  req_parser_init(parser);
 }
 
 static void handle_process_req(struct server_state *server, struct conn *conn) {
-  enum parse_result parsed_size = run_req_parser(conn);
-  switch (parsed_size) {
+  enum parse_result parsed_res = run_req_parser(conn);
+  switch (parsed_res) {
     case PARSE_ERR:
       fprintf(stderr, "invalid message\n");
       reset_req_parser(&conn->req_parser);
@@ -439,14 +441,14 @@ static void handle_process_req(struct server_state *server, struct conn *conn) {
       assert(false);
   }
 
-  offset_buf_advance(&conn->read_buf, parsed_size);
-
   fprintf(stderr, "from client [%d]: ", conn->fd);
-  print_request(stderr, conn->req_parser.cmd, conn->req_parser.args);
+  // TODO: Figure out how to print requests
+  // print_request(stderr, conn->req_parser.cmd, conn->req_parser.args);
   fputc('\n', stderr);
 
-  conn->req_parser.cmd->handler((struct command_ctx){
+  run_command((struct command_ctx){
       .store = &server->store,
+      .arg_count = conn->req_parser.arg_count,
       .args = conn->req_parser.args,
       .out_buf = &conn->write_buf.buf,
       .async_task_thread = server->async_task_thread,
