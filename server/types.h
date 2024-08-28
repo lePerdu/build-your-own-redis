@@ -170,4 +170,23 @@ static inline string string_of_cstring(const char *cstr) {
   return string_dup_slice(make_str_slice(cstr));
 }
 
+/**
+ * Owned string where data is stored "inline" of another allocation.
+ */
+struct inline_string {
+  size_t size;
+  uint8_t data[];
+};
+
+static inline void inline_string_init_slice(
+    struct inline_string *str, struct const_slice slice) {
+  str->size = slice.size;
+  memcpy(str->data, slice.data, slice.size);
+}
+
+static inline struct const_slice inline_string_const_slice(
+    const struct inline_string *str) {
+  return make_const_slice(str->data, str->size);
+}
+
 #endif

@@ -389,10 +389,9 @@ static void do_srandmember(struct command_ctx ctx) {
     return;
   }
 
-  struct const_slice member;
-  bool found_member = hset_peek(found, &member);
-  if (found_member) {
-    write_str_value(ctx.out_buf, member);
+  const struct hset_entry *member = hset_peek(found);
+  if (member != NULL) {
+    write_str_value(ctx.out_buf, hset_entry_key(member));
   } else {
     write_null_value(ctx.out_buf);
   }
@@ -412,11 +411,10 @@ static void do_spop(struct command_ctx ctx) {
     return;
   }
 
-  string member;
-  bool found_member = hset_pop(found, &member);
-  if (found_member) {
-    write_str_value(ctx.out_buf, string_const_slice(&member));
-    string_destroy(&member);
+  struct hset_entry *member = hset_pop(found);
+  if (member != NULL) {
+    write_str_value(ctx.out_buf, hset_entry_key(member));
+    hset_entry_free(member);
   } else {
     write_null_value(ctx.out_buf);
   }

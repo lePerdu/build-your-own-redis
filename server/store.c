@@ -22,9 +22,9 @@ struct store_entry {
   struct heap_ref ttl_ref;
 
   // Owned
-  struct slice key;
-  // Owned
   struct object val;
+
+  struct inline_string key;
 };
 
 struct store_key {
@@ -39,17 +39,16 @@ void store_init(struct store *store) {
 
 static struct store_entry *store_entry_alloc(
     struct const_slice key, struct object val) {
-  struct store_entry *new = malloc(sizeof(*new));
+  struct store_entry *new = malloc(sizeof(*new) + key.size);
   assert(new != NULL);
   new->ttl_ref.index = TTL_INDEX_NONE;
   new->entry.hash_code = slice_hash(key);
-  new->key = slice_dup(key);
   new->val = val;
+  inline_string_init_slice(&new->key, key);
   return new;
 }
 
 void store_entry_free(struct store_entry *ent) {
-  free(ent->key.data);
   object_destroy(ent->val);
   free(ent);
 }
@@ -61,7 +60,7 @@ static bool store_entry_compare(
   const struct store_entry *ent =
       container_of(raw_ent, struct store_entry, entry);
 
-  return slice_eq(key->key, to_const_slice(ent->key));
+  return slice_eq(key->key, inline_string_const_slice(&ent->key));
 }
 
 struct object *store_get(struct store *store, struct const_slice key) {
@@ -141,7 +140,8 @@ struct store_iter_ctx {
 static bool store_iter_wrapper(struct hash_entry *raw_ent, void *arg) {
   struct store_iter_ctx *ctx = arg;
   struct store_entry *ent = container_of(raw_ent, struct store_entry, entry);
-  return ctx->callback(to_const_slice(ent->key), &ent->val, ctx->arg);
+  return ctx->callback(
+      inline_string_const_slice(&ent->key), &ent->val, ctx->arg);
 }
 
 void store_iter(struct store *store, store_iter_fn iter, void *arg) {
@@ -194,7 +194,7 @@ struct store_entry *store_detach_next_expired(
   // in the hash bucket linked list)
   struct store_key key = {
       .entry.hash_code = to_expire->entry.hash_code,
-      .key = to_const_slice(to_expire->key),
+      .key = inline_string_const_slice(&to_expire->key),
   };
 
   // do_detach handles removing the entry from the heap

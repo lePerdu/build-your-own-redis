@@ -63,10 +63,15 @@ bool hset_add(struct object *obj, struct const_slice key);
 bool hset_contains(struct object *obj, struct const_slice key);
 /** Returns `true` if the element was removed, `false` if did not exist */
 bool hset_del(struct object *obj, struct const_slice key);
-/** Returns `true` if the element was removed, `false` if empty */
-bool hset_pop(struct object *obj, string *out);
+/** Returns the removed element, NULL if empty */
+struct hset_entry *hset_pop(struct object *obj);
 /** Returns `true` if the element was found, `false` if empty */
-bool hset_peek(struct object *obj, struct const_slice *out);
+const struct hset_entry *hset_peek(struct object *obj);
+
+/** Key the key of an entry returned by `hset_pop` or `hset_peek` */
+struct const_slice hset_entry_key(const struct hset_entry *entry);
+/** Free an entry returned by `hset_pop` */
+void hset_entry_free(struct hset_entry *entry);
 
 int_val_t hset_size(struct object *obj);
 
@@ -87,8 +92,6 @@ struct const_slice zset_node_key(const struct zset_node *node);
 double zset_node_score(const struct zset_node *node);
 uint32_t zset_node_rank(struct object *obj, struct zset_node *node);
 struct zset_node *zset_node_offset(struct zset_node *node, int64_t offset);
-/** Delete by node reference (from zset_query) */
-/*void zset_node_delete(struct object *obj, struct zset_node *node);*/
 
 /** Add or update score */
 bool zset_add(struct object *obj, struct const_slice key, double score);
