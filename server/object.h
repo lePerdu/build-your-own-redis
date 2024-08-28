@@ -18,7 +18,7 @@ enum obj_type {
 struct object {
   enum obj_type type;
   union {
-    struct slice str_val;
+    string str_val;
 
     // These are both needed for ZSET
     struct {
@@ -35,8 +35,8 @@ struct object {
  */
 uint32_t object_allocation_complexity(const struct object *obj);
 
-static inline struct object make_slice_object(struct slice slice) {
-  return (struct object){.type = OBJ_STR, .str_val = slice};
+static inline struct object make_string_object(string str) {
+  return (struct object){.type = OBJ_STR, .str_val = str};
 }
 
 struct object make_hmap_object(void);
@@ -50,7 +50,7 @@ void object_destroy(struct object obj);
 
 bool hmap_get(
     struct object *obj, struct const_slice key, struct const_slice *val);
-void hmap_set(struct object *obj, struct const_slice key, struct slice val);
+void hmap_set(struct object *obj, struct const_slice key, string val);
 bool hmap_del(struct object *obj, struct const_slice key);
 int_val_t hmap_size(struct object *obj);
 
@@ -64,7 +64,7 @@ bool hset_contains(struct object *obj, struct const_slice key);
 /** Returns `true` if the element was removed, `false` if did not exist */
 bool hset_del(struct object *obj, struct const_slice key);
 /** Returns `true` if the element was removed, `false` if empty */
-bool hset_pop(struct object *obj, struct slice *out);
+bool hset_pop(struct object *obj, string *out);
 /** Returns `true` if the element was found, `false` if empty */
 bool hset_peek(struct object *obj, struct const_slice *out);
 

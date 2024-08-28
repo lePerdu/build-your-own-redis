@@ -50,7 +50,7 @@ enum conn_state {
 
 struct req_parser {
   int arg_count;
-  struct slice args[COMMAND_ARGS_MAX];
+  string args[COMMAND_ARGS_MAX];
   int parsed_args;
 };
 
@@ -408,9 +408,11 @@ static enum parse_result run_req_parser(struct conn *conn) {
       return res;
     }
     offset_buf_advance(&conn->read_buf, res);
-    // TODO: Don't copy arg strings until the read buffer is cleared
-    // (which it won't need to be in the common case)
-    parser->args[parser->parsed_args++] = slice_dup(ref_arg);
+    // "duplicate" the string, with small-string-optimization. Only "large"
+    // strings need allocations
+    // TODO: Don't allocate for large strings until the read buffer is reset (or
+    // the data is needed long-term). (Need some smart CoW for this to work)
+    parser->args[parser->parsed_args++] = string_dup_slice(ref_arg);
   }
 
   return PARSE_OK;
@@ -418,7 +420,7 @@ static enum parse_result run_req_parser(struct conn *conn) {
 
 static void reset_req_parser(struct req_parser *parser) {
   for (int i = 0; i < parser->parsed_args; i++) {
-    free(parser->args[i].data);
+    string_destroy(&parser->args[i]);
   }
   req_parser_init(parser);
 }

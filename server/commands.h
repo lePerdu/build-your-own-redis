@@ -12,7 +12,7 @@
 
 struct command_ctx {
   struct store *store;
-  struct slice *args;
+  string *args;
   uint32_t arg_count;
   struct buffer *out_buf;
   thrd_t async_task_thread;

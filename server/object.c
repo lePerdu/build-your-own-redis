@@ -30,7 +30,7 @@ static void free_hmap_part(
 void object_destroy(struct object obj) {
   switch (obj.type) {
     case OBJ_STR:
-      free(obj.str_val.data);
+      string_destroy(&obj.str_val);
       break;
     case OBJ_HMAP:
       free_hmap_part(obj.hmap_val, hmap_entry_free_iter);
@@ -66,8 +66,8 @@ uint32_t object_allocation_complexity(const struct object *obj) {
 
 struct hmap_entry {
   struct hash_entry entry;
-  struct slice key;
-  struct slice val;
+  string key;
+  string val;
 };
 
 struct hmap_key {
@@ -75,26 +75,26 @@ struct hmap_key {
   struct const_slice key;
 };
 
-static struct hmap_entry *hmap_entry_alloc(
-    struct const_slice key, struct slice val) {
+static struct hmap_entry *hmap_entry_alloc(struct const_slice key, string val) {
   struct hmap_entry *ent = malloc(sizeof(*ent));
   assert(ent != NULL);
   ent->entry.hash_code = slice_hash(key);
-  ent->key = slice_dup(key);
+  ent->key = string_dup_slice(key);
   ent->val = val;
   return ent;
 }
 
 static bool hmap_entry_compare(
-    const struct hash_entry *raw_a, const struct hash_entry *raw_b) {
+    const struct hash_entry *raw_key, const struct hash_entry *raw_ent) {
   return slice_eq(
-      container_of(raw_a, struct hmap_key, entry)->key,
-      container_of(raw_b, struct hmap_key, entry)->key);
+      container_of(raw_key, struct hmap_key, entry)->key,
+      string_const_slice(
+          &container_of(raw_ent, struct hmap_entry, entry)->key));
 }
 
 static void hmap_entry_free(struct hmap_entry *entry) {
-  free(entry->key.data);
-  free(entry->val.data);
+  string_destroy(&entry->key);
+  string_destroy(&entry->val);
   free(entry);
 }
 
@@ -129,11 +129,11 @@ bool hmap_get(
     return false;
   }
   struct hmap_entry *existing = container_of(found, struct hmap_entry, entry);
-  *val = to_const_slice(existing->val);
+  *val = string_const_slice(&existing->val);
   return true;
 }
 
-void hmap_set(struct object *obj, struct const_slice key, struct slice val) {
+void hmap_set(struct object *obj, struct const_slice key, string val) {
   assert(obj->type == OBJ_HMAP);
   struct hash_map *map = obj->hmap_val;
 
@@ -151,7 +151,7 @@ void hmap_set(struct object *obj, struct const_slice key, struct slice val) {
   } else {
     struct hmap_entry *existing_ent =
         container_of(existing, struct hmap_entry, entry);
-    free(existing_ent->val.data);
+    string_destroy(&existing_ent->val);
     existing_ent->val = val;
   }
 }
@@ -189,7 +189,7 @@ static bool hmap_iter_wrapper(struct hash_entry *raw_ent, void *arg) {
   struct hmap_iter_ctx *ctx = arg;
   struct hmap_entry *ent = container_of(raw_ent, struct hmap_entry, entry);
   return ctx->callback(
-      to_const_slice(ent->key), to_const_slice(ent->val), ctx->arg);
+      string_const_slice(&ent->key), string_const_slice(&ent->val), ctx->arg);
 }
 
 void hmap_iter(struct object *obj, hmap_iter_fn iter, void *arg) {
@@ -200,7 +200,7 @@ void hmap_iter(struct object *obj, hmap_iter_fn iter, void *arg) {
 
 struct hset_entry {
   struct hash_entry entry;
-  struct slice key;
+  string key;
 };
 
 struct hset_key {
@@ -220,24 +220,25 @@ static struct hset_entry *hset_entry_alloc(struct const_slice key) {
   struct hset_entry *ent = malloc(sizeof(*ent));
   assert(ent != NULL);
   ent->entry.hash_code = slice_hash(key);
-  ent->key = slice_dup(key);
+  ent->key = string_dup_slice(key);
   return ent;
 }
 
 static bool hset_entry_compare(
-    const struct hash_entry *raw_a, const struct hash_entry *raw_b) {
+    const struct hash_entry *raw_key, const struct hash_entry *raw_ent) {
   return slice_eq(
-      container_of(raw_a, struct hset_key, entry)->key,
-      container_of(raw_b, struct hset_key, entry)->key);
+      container_of(raw_key, struct hset_key, entry)->key,
+      string_const_slice(
+          &container_of(raw_ent, struct hset_entry, entry)->key));
 }
 
 static void hset_entry_free(struct hset_entry *entry) {
-  free(entry->key.data);
+  string_destroy(&entry->key);
   free(entry);
 }
 
-static struct slice hset_entry_free_extract_key(struct hset_entry *entry) {
-  struct slice key = entry->key;
+static string hset_entry_free_extract_key(struct hset_entry *entry) {
+  string key = entry->key;
   free(entry);
   return key;
 }
@@ -291,7 +292,7 @@ bool hset_del(struct object *obj, struct const_slice key) {
   return true;
 }
 
-bool hset_pop(struct object *obj, struct slice *out) {
+bool hset_pop(struct object *obj, string *out) {
   assert(obj->type == OBJ_HSET);
   struct hash_map *set = obj->hmap_val;
 
@@ -312,7 +313,8 @@ bool hset_peek(struct object *obj, struct const_slice *out) {
   if (found == NULL) {
     return false;
   }
-  *out = to_const_slice(container_of(found, struct hset_entry, entry)->key);
+  *out =
+      string_const_slice(&container_of(found, struct hset_entry, entry)->key);
   return true;
 }
 
@@ -329,7 +331,7 @@ struct hset_iter_ctx {
 static bool hset_iter_wrapper(struct hash_entry *raw_ent, void *arg) {
   struct hset_iter_ctx *ctx = arg;
   struct hset_entry *ent = container_of(raw_ent, struct hset_entry, entry);
-  return ctx->callback(to_const_slice(ent->key), ctx->arg);
+  return ctx->callback(string_const_slice(&ent->key), ctx->arg);
 }
 
 void hset_iter(struct object *obj, hset_iter_fn iter, void *arg) {

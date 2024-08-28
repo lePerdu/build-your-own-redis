@@ -93,4 +93,81 @@ static inline ssize_t slice_index_of(struct const_slice slice, uint8_t byte) {
   return -1;
 }
 
+/** Owned, heap-allocated string with associated length */
+struct heap_string {
+  size_t size;
+  uint8_t *data;
+};
+
+enum {
+  SMALL_STRING_MAX_SIZE = sizeof(struct heap_string) - 1,
+};
+
+struct small_str {
+  uint8_t size;
+  uint8_t data[SMALL_STRING_MAX_SIZE];
+};
+
+static_assert(
+    sizeof(struct small_str) <= sizeof(struct heap_string),
+    "struct small_str is too large");
+
+typedef union {
+  struct heap_string heap;
+  struct small_str small;
+} string;
+
+string string_create(size_t size);
+void string_destroy(string *str);
+
+static inline bool string_is_small(const string *str) {
+  return (str->small.size & 1) == 1;
+}
+
+static inline size_t string_size(const string *str) {
+  if (string_is_small(str)) {
+    return str->small.size >> 1;
+  }
+  return str->heap.size >> 1;
+}
+
+static inline const uint8_t *string_const_data(const string *str) {
+  if (string_is_small(str)) {
+    return &str->small.data[0];
+  }
+  return str->heap.data;
+}
+
+static inline uint8_t *string_data(string *str) {
+  if (string_is_small(str)) {
+    return &str->small.data[0];
+  }
+  return str->heap.data;
+}
+
+static inline struct slice string_slice(string *str) {
+  return make_slice(string_data(str), string_size(str));
+}
+
+static inline struct const_slice string_const_slice(const string *str) {
+  return make_const_slice(string_const_data(str), string_size(str));
+}
+
+static inline string string_move(string *str) {
+  string copy = *str;
+  // Replace with empty small string (with no allocation)
+  *str = string_create(0);
+  return copy;
+}
+
+static inline string string_dup_slice(struct const_slice slice) {
+  string str = string_create(slice.size);
+  memcpy(string_data(&str), slice.data, slice.size);
+  return str;
+}
+
+static inline string string_of_cstring(const char *cstr) {
+  return string_dup_slice(make_str_slice(cstr));
+}
+
 #endif

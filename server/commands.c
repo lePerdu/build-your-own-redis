@@ -53,7 +53,7 @@ void store_entry_free_maybe_async(
 }
 
 static void do_get(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
     write_null_value(ctx.out_buf);
@@ -65,18 +65,18 @@ static void do_get(struct command_ctx ctx) {
     return;
   }
 
-  write_str_value(ctx.out_buf, to_const_slice(found->str_val));
+  write_str_value(ctx.out_buf, string_const_slice(&found->str_val));
 }
 
 static void do_set(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
-  store_set(ctx.store, key, make_slice_object(slice_move(&ctx.args[2])));
+  struct const_slice key = string_const_slice(&ctx.args[1]);
+  store_set(ctx.store, key, make_string_object(string_move(&ctx.args[2])));
   write_simple_str_value(ctx.out_buf, "OK");
 }
 
 static void do_del(struct command_ctx ctx) {
   struct store_entry *removed =
-      store_detach(ctx.store, to_const_slice(ctx.args[1]));
+      store_detach(ctx.store, string_const_slice(&ctx.args[1]));
   if (removed == NULL) {
     write_int_value(ctx.out_buf, 0);
     return;
@@ -106,7 +106,7 @@ enum {
 };
 
 static void do_ttl(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
     write_int_value(ctx.out_buf, TTL_NOT_FOUND);
@@ -126,10 +126,10 @@ static void do_ttl(struct command_ctx ctx) {
 }
 
 static void do_expire(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   int_val_t ttl_ms;
-  if (!parse_int_arg(&ttl_ms, to_const_slice(ctx.args[2]))) {
+  if (!parse_int_arg(&ttl_ms, string_const_slice(&ctx.args[2]))) {
     write_simple_err_value(ctx.out_buf, "invalid ttl");
     return;
   }
@@ -153,7 +153,7 @@ static void do_expire(struct command_ctx ctx) {
 }
 
 static void do_persist(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
     write_int_value(ctx.out_buf, 0);
@@ -169,7 +169,7 @@ static void do_persist(struct command_ctx ctx) {
 }
 
 static void do_hget(struct command_ctx ctx) {
-  struct object *outer = store_get(ctx.store, to_const_slice(ctx.args[1]));
+  struct object *outer = store_get(ctx.store, string_const_slice(&ctx.args[1]));
   if (outer == NULL) {
     write_null_value(ctx.out_buf);
     return;
@@ -181,7 +181,7 @@ static void do_hget(struct command_ctx ctx) {
   }
 
   struct const_slice value;
-  if (!hmap_get(outer, to_const_slice(ctx.args[2]), &value)) {
+  if (!hmap_get(outer, string_const_slice(&ctx.args[2]), &value)) {
     write_null_value(ctx.out_buf);
     return;
   }
@@ -190,9 +190,9 @@ static void do_hget(struct command_ctx ctx) {
 }
 
 static void do_hset(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
-  struct const_slice field = to_const_slice(ctx.args[2]);
+  struct const_slice field = string_const_slice(&ctx.args[2]);
 
   struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
@@ -205,14 +205,14 @@ static void do_hset(struct command_ctx ctx) {
     return;
   }
 
-  hmap_set(outer, field, slice_move(&ctx.args[3]));
+  hmap_set(outer, field, string_move(&ctx.args[3]));
   write_int_value(ctx.out_buf, 1);
 }
 
 static void do_hdel(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
-  struct const_slice field = to_const_slice(ctx.args[2]);
+  struct const_slice field = string_const_slice(&ctx.args[2]);
 
   struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
@@ -230,7 +230,7 @@ static void do_hdel(struct command_ctx ctx) {
 }
 
 static void do_hlen(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -256,7 +256,7 @@ static bool do_hkeys_append_key_to_value(
 }
 
 static void do_hkeys(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -282,7 +282,7 @@ static bool do_hgetall_append_key_val_to_value(
 }
 
 static void do_hgetall(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -300,9 +300,9 @@ static void do_hgetall(struct command_ctx ctx) {
 }
 
 static void do_sadd(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
-  struct const_slice set_key = to_const_slice(ctx.args[2]);
+  struct const_slice set_key = string_const_slice(&ctx.args[2]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -319,9 +319,9 @@ static void do_sadd(struct command_ctx ctx) {
 }
 
 static void do_sismember(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
-  struct const_slice set_key = to_const_slice(ctx.args[2]);
+  struct const_slice set_key = string_const_slice(&ctx.args[2]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -339,9 +339,9 @@ static void do_sismember(struct command_ctx ctx) {
 }
 
 static void do_srem(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
-  struct const_slice set_key = to_const_slice(ctx.args[2]);
+  struct const_slice set_key = string_const_slice(&ctx.args[2]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -359,7 +359,7 @@ static void do_srem(struct command_ctx ctx) {
 }
 
 static void do_scard(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -376,7 +376,7 @@ static void do_scard(struct command_ctx ctx) {
 }
 
 static void do_srandmember(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -399,7 +399,7 @@ static void do_srandmember(struct command_ctx ctx) {
 }
 
 static void do_spop(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -412,11 +412,11 @@ static void do_spop(struct command_ctx ctx) {
     return;
   }
 
-  struct slice member;
+  string member;
   bool found_member = hset_pop(found, &member);
   if (found_member) {
-    write_str_value(ctx.out_buf, to_const_slice(member));
-    free(member.data);
+    write_str_value(ctx.out_buf, string_const_slice(&member));
+    string_destroy(&member);
   } else {
     write_null_value(ctx.out_buf);
   }
@@ -429,7 +429,7 @@ static bool append_set_key_to_value(struct const_slice key, void *arg) {
 }
 
 static void do_smembers(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -447,7 +447,7 @@ static void do_smembers(struct command_ctx ctx) {
 }
 
 static void do_zscore(struct command_ctx ctx) {
-  struct object *outer = store_get(ctx.store, to_const_slice(ctx.args[1]));
+  struct object *outer = store_get(ctx.store, string_const_slice(&ctx.args[1]));
   if (outer == NULL) {
     write_null_value(ctx.out_buf);
     return;
@@ -459,7 +459,7 @@ static void do_zscore(struct command_ctx ctx) {
   }
 
   double score;
-  bool found = zset_score(outer, to_const_slice(ctx.args[2]), &score);
+  bool found = zset_score(outer, string_const_slice(&ctx.args[2]), &score);
   if (found) {
     write_float_value(ctx.out_buf, score);
   } else {
@@ -468,15 +468,15 @@ static void do_zscore(struct command_ctx ctx) {
 }
 
 static void do_zadd(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   double score;
-  if (!parse_float_arg(&score, to_const_slice(ctx.args[2]))) {
+  if (!parse_float_arg(&score, string_const_slice(&ctx.args[2]))) {
     write_simple_err_value(ctx.out_buf, "invalid score");
     return;
   }
 
-  struct const_slice member = to_const_slice(ctx.args[3]);
+  struct const_slice member = string_const_slice(&ctx.args[3]);
 
   struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
@@ -494,9 +494,9 @@ static void do_zadd(struct command_ctx ctx) {
 }
 
 static void do_zrem(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
-  struct const_slice member = to_const_slice(ctx.args[2]);
+  struct const_slice member = string_const_slice(&ctx.args[2]);
 
   struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
@@ -514,7 +514,7 @@ static void do_zrem(struct command_ctx ctx) {
 }
 
 static void do_zcard(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   struct object *found = store_get(ctx.store, key);
   if (found == NULL) {
@@ -531,9 +531,9 @@ static void do_zcard(struct command_ctx ctx) {
 }
 
 static void do_zrank(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
-  struct const_slice member = to_const_slice(ctx.args[2]);
+  struct const_slice member = string_const_slice(&ctx.args[2]);
 
   struct object *outer = store_get(ctx.store, key);
   if (outer == NULL) {
@@ -555,25 +555,25 @@ static void do_zrank(struct command_ctx ctx) {
 }
 
 static void do_zquery(struct command_ctx ctx) {
-  struct const_slice key = to_const_slice(ctx.args[1]);
+  struct const_slice key = string_const_slice(&ctx.args[1]);
 
   double score;
-  if (!parse_float_arg(&score, to_const_slice(ctx.args[2]))) {
+  if (!parse_float_arg(&score, string_const_slice(&ctx.args[2]))) {
     write_simple_err_value(ctx.out_buf, "invalid score");
     return;
   }
 
-  struct const_slice member = to_const_slice(ctx.args[3]);
+  struct const_slice member = string_const_slice(&ctx.args[3]);
 
   int_val_t offset;
-  if (!parse_int_arg(&offset, to_const_slice(ctx.args[4]))) {
+  if (!parse_int_arg(&offset, string_const_slice(&ctx.args[4]))) {
     write_simple_err_value(ctx.out_buf, "invalid offset");
     return;
   }
 
   int_val_t limit;
   // NOLINTNEXTLINE(readability-magic-numbers)
-  if (!parse_int_arg(&limit, to_const_slice(ctx.args[5])) || limit < 0) {
+  if (!parse_int_arg(&limit, string_const_slice(&ctx.args[5])) || limit < 0) {
     write_simple_err_value(ctx.out_buf, "invalid limit");
     return;
   }
@@ -729,7 +729,7 @@ void init_commands(void) {
 
 void run_command(struct command_ctx ctx) {
   assert(ctx.arg_count > 0);
-  struct const_slice cmd_name = to_const_slice(ctx.args[0]);
+  struct const_slice cmd_name = string_const_slice(&ctx.args[0]);
   struct command_key key = {
       .base.hash_code = slice_hash(cmd_name),
       .name = cmd_name,
