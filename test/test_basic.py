@@ -1,3 +1,4 @@
+import random
 import time
 
 from client import Client
@@ -31,6 +32,14 @@ def test_get_returns_last_set_value(c: Client):
     _ = c.send("SET", "abc", "def")
     val = c.send("GET", "abc")
     assert val == b"def"
+
+
+@client_test
+def test_set_and_get_large_value(c: Client):
+    large_value = random.randbytes(1_000_000)
+    _ = c.send("SET", "abc", large_value)
+    val = c.send("GET", "abc")
+    assert val == large_value
 
 
 @client_test

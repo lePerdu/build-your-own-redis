@@ -96,12 +96,12 @@ static inline ssize_t slice_index_of(struct const_slice slice, uint8_t byte) {
 /** Owned, heap-allocated string with associated length */
 struct heap_string {
   bool is_small : 1;
-  size_t size : sizeof(size_t) - 1;
+  size_t size : sizeof(size_t) * 8 - 1;
   uint8_t *data;
 };
 
 static_assert(
-    sizeof(struct heap_string) <= 2 * sizeof(void *),
+    sizeof(struct heap_string) == 2 * sizeof(void *),
     "struct heap_str is larger than expected");
 
 enum {
@@ -110,7 +110,7 @@ enum {
 
 struct small_str {
   bool is_small : 1;
-  uint8_t size : sizeof(size_t) - 1;
+  uint8_t size : 7;
   uint8_t data[SMALL_STRING_MAX_SIZE];
 };
 
