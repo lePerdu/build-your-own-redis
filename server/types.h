@@ -95,24 +95,31 @@ static inline ssize_t slice_index_of(struct const_slice slice, uint8_t byte) {
 
 /** Owned, heap-allocated string with associated length */
 struct heap_string {
-  size_t size;
+  bool is_small : 1;
+  size_t size : sizeof(size_t) - 1;
   uint8_t *data;
 };
+
+static_assert(
+    sizeof(struct heap_string) <= 2 * sizeof(void *),
+    "struct heap_str is larger than expected");
 
 enum {
   SMALL_STRING_MAX_SIZE = sizeof(struct heap_string) - 1,
 };
 
 struct small_str {
-  uint8_t size;
+  bool is_small : 1;
+  uint8_t size : sizeof(size_t) - 1;
   uint8_t data[SMALL_STRING_MAX_SIZE];
 };
 
 static_assert(
     sizeof(struct small_str) <= sizeof(struct heap_string),
-    "struct small_str is too large");
+    "struct small_str is larger than expected");
 
 typedef union {
+  bool is_small : 1;
   struct heap_string heap;
   struct small_str small;
 } string;
@@ -120,26 +127,19 @@ typedef union {
 string string_create(size_t size);
 void string_destroy(string *str);
 
-static inline bool string_is_small(const string *str) {
-  return (str->small.size & 1) == 1;
-}
-
 static inline size_t string_size(const string *str) {
-  if (string_is_small(str)) {
-    return str->small.size >> 1;
-  }
-  return str->heap.size >> 1;
+  return str->is_small ? str->small.size : str->heap.size;
 }
 
 static inline const uint8_t *string_const_data(const string *str) {
-  if (string_is_small(str)) {
+  if (str->is_small) {
     return &str->small.data[0];
   }
   return str->heap.data;
 }
 
 static inline uint8_t *string_data(string *str) {
-  if (string_is_small(str)) {
+  if (str->is_small) {
     return &str->small.data[0];
   }
   return str->heap.data;
