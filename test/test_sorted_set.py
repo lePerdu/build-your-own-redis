@@ -1,6 +1,4 @@
-import itertools
-
-from client import Client, ResponseError, resp_object_dict, resp_object_pairs
+from client import Client, ResponseError
 from test_util import client_test
 
 
@@ -9,6 +7,13 @@ def test_zscore_returns_value_after_zadd(c: Client):
     _ = c.send("ZADD", "scores", 4.32, "field")
     val = c.send("ZSCORE", "scores", "field")
     assert val == 4.32
+
+
+@client_test
+def test_type_is_zset_after_zadd(c: Client):
+    _ = c.send("ZADD", "my-set", 4.3, "field")
+    val = c.send("TYPE", "my-set")
+    assert val == b"zset"
 
 
 @client_test

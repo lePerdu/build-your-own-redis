@@ -19,6 +19,13 @@ def test_hget_returns_value_after_latest_hset(c: Client):
 
 
 @client_test
+def test_type_is_hash_after_hset(c: Client):
+    _ = c.send("HSET", "map", "field", "val")
+    val = c.send("TYPE", "map")
+    assert val == b"hash"
+
+
+@client_test
 def test_hget_missing_key(c: Client):
     val = c.send("HGET", "map", "field")
     assert val is None

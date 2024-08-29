@@ -9,6 +9,13 @@ def test_sadd_returns_1_if_missign(c: Client):
 
 
 @client_test
+def test_type_is_set_after_sadd(c: Client):
+    _ = c.send("SADD", "my-set", "key")
+    val = c.send("TYPE", "my-set")
+    assert val == b"set"
+
+
+@client_test
 def test_sadd_returns_0_if_already_added(c: Client):
     val = c.send("SADD", "set", "key")
     val = c.send("SADD", "set", "key")

@@ -100,6 +100,32 @@ static void do_keys(struct command_ctx ctx) {
   store_iter(ctx.store, do_keys_append_key_to_value, ctx.out_buf);
 }
 
+static const char *object_type_name(enum obj_type type) {
+  switch (type) {
+    case OBJ_STR:
+      return "string";
+    case OBJ_HMAP:
+      return "hash";
+    case OBJ_HSET:
+      return "set";
+    case OBJ_ZSET:
+      return "zset";
+    default:
+      assert(false);
+  }
+}
+
+static void do_type(struct command_ctx ctx) {
+  struct const_slice key = string_const_slice(&ctx.args[1]);
+  struct object *found = store_get(ctx.store, key);
+  if (found == NULL) {
+    write_simple_str_value(ctx.out_buf, "none");
+    return;
+  }
+
+  write_simple_str_value(ctx.out_buf, object_type_name(found->type));
+}
+
 enum {
   TTL_NOT_FOUND = -2,
   TTL_NO_EXPIRE = -1,
@@ -671,6 +697,7 @@ static const struct command_def all_commands[] = {
     {"SET", 2, do_set},
     {"DEL", 1, do_del},
     {"KEYS", 0, do_keys},
+    {"TYPE", 1, do_type},
 
     {"TTL", 1, do_ttl},
     {"EXPIRE", 2, do_expire},

@@ -174,3 +174,23 @@ def test_key_does_not_expire_if_persisted_before_old_ttl(c: Client):
     time.sleep(1.0 + TTL_EPSILON / 1000.0)
     val = c.send("GET", "not-expired")
     assert val == b"still-there"
+
+
+@client_test
+def test_type_is_none_if_key_does_not_exist(c: Client):
+    val = c.send("TYPE", "not-exists")
+    assert val == b"none"
+
+
+@client_test
+def test_type_is_string_if_key_is_string(c: Client):
+    _ = c.send("SET", "string-key", "abc")
+    val = c.send("TYPE", "string-key")
+    assert val == b"string"
+
+
+@client_test
+def test_type_is_string_if_key_is_numeric_string(c: Client):
+    _ = c.send("SET", "string-key", "1234")
+    val = c.send("TYPE", "string-key")
+    assert val == b"string"
