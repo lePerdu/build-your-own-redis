@@ -121,20 +121,20 @@ static void do_ttl(struct command_ctx ctx) {
 
   uint64_t now = get_monotonic_usec();
   uint64_t ttl =
-      (uint64_t)expires_at_us > now ? (expires_at_us - now) / USEC_PER_MSEC : 0;
+      (uint64_t)expires_at_us > now ? (expires_at_us - now) / USEC_PER_SEC : 0;
   write_int_value(ctx.out_buf, (int_val_t)ttl);
 }
 
 static void do_expire(struct command_ctx ctx) {
   struct const_slice key = string_const_slice(&ctx.args[1]);
 
-  int_val_t ttl_ms;
-  if (!parse_int_arg(&ttl_ms, string_const_slice(&ctx.args[2]))) {
+  int_val_t ttl_sec;
+  if (!parse_int_arg(&ttl_sec, string_const_slice(&ctx.args[2]))) {
     write_simple_err_value(ctx.out_buf, "invalid ttl");
     return;
   }
 
-  if (ttl_ms <= 0) {
+  if (ttl_sec <= 0) {
     // Delegate to the DEL since it might decide to perform async deletion
     // DEL just uses the first argument, so the context can be passed as-is
     do_del(ctx);
@@ -147,7 +147,7 @@ static void do_expire(struct command_ctx ctx) {
     return;
   }
 
-  uint64_t expires_at_us = get_monotonic_usec() + ttl_ms * USEC_PER_MSEC;
+  uint64_t expires_at_us = get_monotonic_usec() + ttl_sec * USEC_PER_SEC;
   store_object_set_expire(ctx.store, found, (int64_t)expires_at_us);
   write_int_value(ctx.out_buf, 1);
 }

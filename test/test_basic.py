@@ -125,10 +125,10 @@ TTL_EPSILON = 50
 @client_test
 def test_ttl_is_saved_after_expire(c: Client):
     _ = c.send("SET", "expires", "temporary")
-    _ = c.send("EXPIRE", "expires", 5000)
+    _ = c.send("EXPIRE", "expires", 5)
     val = c.send("TTL", "expires")
     assert isinstance(val, int)
-    assert 5000 - TTL_EPSILON <= val <= 5000
+    assert 4 <= val <= 5
 
 
 @client_test
@@ -142,7 +142,7 @@ def test_key_expires_immediately_if_ttl_0(c: Client):
 @client_test
 def test_key_expires_immediately_if_ttl_negative(c: Client):
     _ = c.send("SET", "expired", "temporary")
-    _ = c.send("EXPIRE", "expired", -10)
+    _ = c.send("EXPIRE", "expired", -1)
     val = c.send("GET", "expired")
     assert val is None
 
@@ -150,8 +150,8 @@ def test_key_expires_immediately_if_ttl_negative(c: Client):
 @client_test
 def test_key_expires_soon_after_expiration_time(c: Client):
     _ = c.send("SET", "expired", "temporary")
-    _ = c.send("EXPIRE", "expired", 500)
-    time.sleep(0.5 + TTL_EPSILON / 1000.0)
+    _ = c.send("EXPIRE", "expired", 1)
+    time.sleep(1.0 + TTL_EPSILON / 1000.0)
     val = c.send("GET", "expired")
     assert val is None
 
@@ -159,9 +159,9 @@ def test_key_expires_soon_after_expiration_time(c: Client):
 @client_test
 def test_key_does_not_expire_if_ttl_changed_before_old_ttl(c: Client):
     _ = c.send("SET", "not-expired", "still-there")
-    _ = c.send("EXPIRE", "not-expired", 500)
-    _ = c.send("EXPIRE", "not-expired", 10_000)
-    time.sleep(0.5 + TTL_EPSILON / 1000.0)
+    _ = c.send("EXPIRE", "not-expired", 1)
+    _ = c.send("EXPIRE", "not-expired", 10)
+    time.sleep(1.0 + TTL_EPSILON / 1000.0)
     val = c.send("GET", "not-expired")
     assert val == b"still-there"
 
@@ -169,8 +169,8 @@ def test_key_does_not_expire_if_ttl_changed_before_old_ttl(c: Client):
 @client_test
 def test_key_does_not_expire_if_persisted_before_old_ttl(c: Client):
     _ = c.send("SET", "not-expired", "still-there")
-    _ = c.send("EXPIRE", "not-expired", 500)
+    _ = c.send("EXPIRE", "not-expired", 1)
     _ = c.send("PERSIST", "not-expired")
-    time.sleep(0.5 + TTL_EPSILON / 1000.0)
+    time.sleep(1.0 + TTL_EPSILON / 1000.0)
     val = c.send("GET", "not-expired")
     assert val == b"still-there"
